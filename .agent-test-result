@@ -1,33 +1,39 @@
 PASS
 
-All 36 test cases pass (25 original + 11 new for Session 2 requirements).
+All 51 test cases pass. Session 3 implementation verified.
 
-## Test Summary
+## Summary
 
-| Group | Tests | Result |
-|-------|-------|--------|
-| TC-01..07: claude-config.json structure | 7 | PASS |
-| TC-08..15: setup.sh functionality | 8 | PASS |
-| TC-16..17: Idempotency | 2 | PASS |
-| TC-18..22: Merge behavior | 5 | PASS |
-| TC-23..25: Error handling | 3 | PASS |
-| TC-26..27: Edit permission (req 2.5) | 2 | PASS |
-| TC-28..33: GH Actions monitoring (req 2.6) | 6 | PASS |
-| TC-34..36: Branch cleanup (req 2.7) | 3 | PASS |
-| **Total** | **36** | **36 PASS / 0 FAIL** |
+### Tests Executed
+- **Total:** 51 test cases
+- **Passed:** 51
+- **Failed:** 0
 
-## Coverage Against REQUIREMENT.md §5.1 MVP Acceptance Criteria
+### Coverage
+| Requirement | Tests | Result |
+|-------------|-------|--------|
+| §2.1 Central config file | TC-01..07 | ✅ PASS |
+| §2.2 Global settings target (`~/.claude/settings.json`) | TC-10, TC-37..39 | ✅ PASS |
+| §2.3/2.4 cd+git permission auto-approval | TC-03, TC-12 | ✅ PASS |
+| §2.5 Edit permission | TC-26, TC-27 | ✅ PASS |
+| §2.6 GH Actions monitoring | TC-28..33, TC-35 | ✅ PASS |
+| §2.7 Branch cleanup | TC-34, TC-36 | ✅ PASS |
+| §2.8 Permission subfiles (auto-discovery, dedup) | TC-40..46 | ✅ PASS |
+| §2.9 Dependency pre-check and auto-install | TC-47..51 | ✅ PASS |
+| §3.5 Idempotency | TC-16, TC-17 | ✅ PASS |
+| §3.5 Merge, don't replace | TC-18..22 | ✅ PASS |
+| §4.1 Error handling | TC-23..25 | ✅ PASS |
 
-| Criterion | Status |
-|-----------|--------|
-| claude-config.json exists with default permissions including cd+git and Edit | VERIFIED |
-| setup.sh reads config and writes .claude/settings.json | VERIFIED |
-| After setup, no approval prompts for pre-approved permissions | VERIFIED |
-| Compound cd+git commands never trigger approval prompt | VERIFIED |
-| Editing files in subdirectory never triggers approval prompt | VERIFIED |
-| After triggering GH Actions, Claude polls and reports final status | VERIFIED (PostToolUse hook + monitor script) |
-| After merging PR, source branch auto-deleted | VERIFIED (delete_branch_on_merge via gh api PATCH) |
+### Session 3 Changes Verified
+- `setup.sh` correctly targets `$HOME/.claude/settings.json` (global, not project-level)
+- `permissions/git.json` and `permissions/file-editing.json` exist with proper structure
+- setup.sh auto-discovers all `permissions/*.json` subfiles via glob
+- Adding a new permission subfile is automatically picked up (TC-46 confirmed)
+- No permission duplicates in merged output
+- `dependencies` field in `claude-config.json` drives auto-install
+- jq bootstrapped before config is parsed (chicken-and-egg solved)
+- `detect_pkg_mgr` supports brew/apt/dnf/yum
 
 ## Test Script
 
-`tests/test_setup.sh` — automated, runnable test suite (36 tests)
+`tests/test_setup.sh` — automated, runnable test suite (51 tests)
