@@ -1,0 +1,7 @@
+{
+  "description": "Git operations — allows compound cd+git commands to prevent bare repository attack warnings",
+  "allow": [
+    "Bash(cd * && git *)"
+  ],
+  "deny": []
+}
