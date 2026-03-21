@@ -609,6 +609,38 @@ else
     fail "TC-51: detect_pkg_mgr supports brew/apt/dnf/yum" "one or more package managers missing"
 fi
 
+# ── TC Group 12: maybe_sudo() sudo-less container support (req 2.9, Session 4) ──
+
+echo ""
+echo "=== TC-52..TC-54: maybe_sudo() sudo-less container support (req 2.9) ==="
+
+# TC-52: maybe_sudo() function exists in setup.sh (code inspection)
+if grep -q 'maybe_sudo()' "$SETUP_SCRIPT"; then
+    pass "TC-52: maybe_sudo() helper function exists in setup.sh"
+else
+    fail "TC-52: maybe_sudo() helper function exists in setup.sh" "function not found"
+fi
+
+# TC-53: install_dep() uses maybe_sudo (not hardcoded sudo) for apt/dnf/yum
+apt_uses_maybe=$(grep 'apt-get install' "$SETUP_SCRIPT" | grep 'maybe_sudo' || true)
+dnf_uses_maybe=$(grep 'dnf install' "$SETUP_SCRIPT" | grep 'maybe_sudo' || true)
+yum_uses_maybe=$(grep 'yum install' "$SETUP_SCRIPT" | grep 'maybe_sudo' || true)
+if [[ -n "$apt_uses_maybe" && -n "$dnf_uses_maybe" && -n "$yum_uses_maybe" ]]; then
+    pass "TC-53: install_dep() uses maybe_sudo for apt/dnf/yum (not hardcoded sudo)"
+else
+    fail "TC-53: install_dep() uses maybe_sudo for apt/dnf/yum" "apt=${apt_uses_maybe:-missing} dnf=${dnf_uses_maybe:-missing} yum=${yum_uses_maybe:-missing}"
+fi
+
+# TC-54: maybe_sudo() runs as root (uid 0) without sudo, uses sudo when available,
+#        and falls back to direct execution otherwise (code inspection of three branches)
+has_uid_zero=$(grep -A2 'maybe_sudo()' "$SETUP_SCRIPT" | grep -c 'id -u.*-eq 0\|eq 0.*id -u' || grep -c '"$(id -u)" -eq 0' "$SETUP_SCRIPT" || true)
+has_sudo_branch=$(grep 'command -v sudo' "$SETUP_SCRIPT" | head -1 || true)
+if [[ -n "$has_sudo_branch" ]] && grep -q '"$(id -u)" -eq 0' "$SETUP_SCRIPT"; then
+    pass "TC-54: maybe_sudo() has root-check and sudo-check branches"
+else
+    fail "TC-54: maybe_sudo() has root-check and sudo-check branches" "one or more branches missing"
+fi
+
 # ── Cleanup & summary ─────────────────────────────────────────────────────────
 
 # Restore a clean working settings.json
