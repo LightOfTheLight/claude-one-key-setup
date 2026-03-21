@@ -5,8 +5,15 @@ on:
     branches-ignore:
       - master
       - main
+  workflow_dispatch:
+    inputs:
+      agent_name:
+        description: 'Agent to run (PO, DEV, TESTER)'
+        required: true
+        type: string
 
 env:
+  REGISTRY: ghcr.io
   AGENT_IMAGE: ghcr.io/lightofthelight/touchfish-agent:latest
 
 jobs:
@@ -16,27 +23,33 @@ jobs:
       agent_name: ${{ steps.parse.outputs.agent_name }}
       should_run: ${{ steps.parse.outputs.should_run }}
     steps:
-      - name: Parse commit message for agent
+      - name: Parse trigger
         id: parse
         run: |
-          COMMIT_MSG="${{ github.event.head_commit.message }}"
-          echo "Commit message: $COMMIT_MSG"
-
-          # Extract agent name from commit message
-          # Format: @AGENT_NAME or [AGENT_NAME]
-          if [[ "$COMMIT_MSG" =~ @(PO|DEV|TESTER) ]]; then
-            AGENT_NAME="${BASH_REMATCH[1]}"
-            echo "agent_name=$AGENT_NAME" >> $GITHUB_OUTPUT
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "agent_name=${{ github.event.inputs.agent_name }}" >> $GITHUB_OUTPUT
             echo "should_run=true" >> $GITHUB_OUTPUT
-            echo "Detected agent: $AGENT_NAME"
-          elif [[ "$COMMIT_MSG" =~ \[(PO|DEV|TESTER)\] ]]; then
-            AGENT_NAME="${BASH_REMATCH[1]}"
-            echo "agent_name=$AGENT_NAME" >> $GITHUB_OUTPUT
-            echo "should_run=true" >> $GITHUB_OUTPUT
-            echo "Detected agent: $AGENT_NAME"
+            echo "Chain trigger: ${{ github.event.inputs.agent_name }}"
           else
-            echo "should_run=false" >> $GITHUB_OUTPUT
-            echo "No agent trigger found in commit message"
+            COMMIT_MSG="${{ github.event.head_commit.message }}"
+            echo "Commit message: $COMMIT_MSG"
+
+            # Extract agent name from commit message
+            # Format: @AGENT_NAME or [AGENT_NAME]
+            if [[ "$COMMIT_MSG" =~ @(PO|DEV|TESTER) ]]; then
+              AGENT_NAME="${BASH_REMATCH[1]}"
+              echo "agent_name=$AGENT_NAME" >> $GITHUB_OUTPUT
+              echo "should_run=true" >> $GITHUB_OUTPUT
+              echo "Detected agent: $AGENT_NAME"
+            elif [[ "$COMMIT_MSG" =~ \[(PO|DEV|TESTER)\] ]]; then
+              AGENT_NAME="${BASH_REMATCH[1]}"
+              echo "agent_name=$AGENT_NAME" >> $GITHUB_OUTPUT
+              echo "should_run=true" >> $GITHUB_OUTPUT
+              echo "Detected agent: $AGENT_NAME"
+            else
+              echo "should_run=false" >> $GITHUB_OUTPUT
+              echo "No agent trigger found in commit message"
+            fi
           fi
 
   run-agent:
@@ -45,8 +58,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: read
     outputs:
-      temp_branch: ${{ steps.temp-branch.outputs.temp_branch }}
+      working_branch: ${{ steps.setup-branch.outputs.working_branch }}
       has_changes: ${{ steps.push.outputs.has_changes }}
     env:
       AGENT_NAME: ${{ needs.parse-trigger.outputs.agent_name }}
@@ -63,22 +77,47 @@ jobs:
           git config --global user.email "agent@touchfish.local"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Get commit details
+      - name: Setup working branch
+        id: setup-branch
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            # Chain continuation - work on current branch
+            echo "working_branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "is_new_branch=false" >> $GITHUB_OUTPUT
+            echo "Continuing on branch: ${{ github.ref_name }}"
+          else
+            # Initial trigger - create working branch
+            TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+            WORKING_BRANCH="agent/${{ env.AGENT_NAME }}/${TIMESTAMP}"
+            git checkout -b "$WORKING_BRANCH"
+            # Store origin branch for final PR
+            echo "${{ github.ref_name }}" > .agent-chain-origin
+            git add .agent-chain-origin
+            git commit -m "Chain origin: ${{ github.ref_name }}"
+            echo "working_branch=$WORKING_BRANCH" >> $GITHUB_OUTPUT
+            echo "is_new_branch=true" >> $GITHUB_OUTPUT
+            echo "Created branch: $WORKING_BRANCH (origin: ${{ github.ref_name }})"
+          fi
+
+      - name: Get context
         id: commit
         run: |
           echo "sha=${{ github.sha }}" >> $GITHUB_OUTPUT
-          echo "message<<EOF" >> $GITHUB_OUTPUT
-          echo "${{ github.event.head_commit.message }}" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-          echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "message=Chain trigger: ${{ env.AGENT_NAME }}" >> $GITHUB_OUTPUT
+          else
+            echo "message<<EOF" >> $GITHUB_OUTPUT
+            echo "${{ github.event.head_commit.message }}" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+          echo "branch=${{ steps.setup-branch.outputs.working_branch }}" >> $GITHUB_OUTPUT
 
-      - name: Create temp branch for agent work
-        id: temp-branch
-        run: |
-          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          TEMP_BRANCH="agent/${{ env.AGENT_NAME }}/${TIMESTAMP}"
-          git checkout -b "$TEMP_BRANCH"
-          echo "temp_branch=$TEMP_BRANCH" >> $GITHUB_OUTPUT
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Pull Agent Docker Image
         run: |
@@ -104,7 +143,7 @@ jobs:
             -w /workspace \
             ${{ env.AGENT_IMAGE }}
 
-      - name: Push changes to temp branch
+      - name: Push changes
         id: push
         run: |
           # Stage and commit any remaining unstaged changes
@@ -115,50 +154,113 @@ jobs:
             Co-Authored-By: TouchFish Agent <agent@touchfish.local>"
           fi
 
-          # Check if agent made any commits
-          if git log --oneline ${{ github.ref_name }}..${{ steps.temp-branch.outputs.temp_branch }} | grep -q .; then
-            git push origin "${{ steps.temp-branch.outputs.temp_branch }}"
-            echo "has_changes=true" >> $GITHUB_OUTPUT
+          WORKING="${{ steps.setup-branch.outputs.working_branch }}"
+          if [[ "${{ steps.setup-branch.outputs.is_new_branch }}" == "true" ]]; then
+            # New branch - compare with source branch
+            if git log --oneline ${{ github.ref_name }}..HEAD | grep -q .; then
+              git push origin "$WORKING"
+              echo "has_changes=true" >> $GITHUB_OUTPUT
+            else
+              echo "No changes to push"
+              echo "has_changes=false" >> $GITHUB_OUTPUT
+            fi
           else
-            echo "No changes to push"
-            echo "has_changes=false" >> $GITHUB_OUTPUT
+            # Chain continuation - compare with remote
+            if git log --oneline "origin/$WORKING..HEAD" 2>/dev/null | grep -q .; then
+              git push origin "$WORKING"
+              echo "has_changes=true" >> $GITHUB_OUTPUT
+            else
+              echo "No changes to push"
+              echo "has_changes=false" >> $GITHUB_OUTPUT
+            fi
           fi
 
-  create-pr:
+  chain-or-pr:
     needs: [parse-trigger, run-agent]
     if: needs.parse-trigger.outputs.should_run == 'true' && needs.run-agent.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
+      actions: write
     steps:
-      - name: Checkout repository
+      - name: Checkout working branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.run-agent.outputs.temp_branch }}
+          ref: ${{ needs.run-agent.outputs.working_branch }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create Pull Request
+      - name: Determine next action
+        id: next
+        run: |
+          AGENT="${{ needs.parse-trigger.outputs.agent_name }}"
+          if [[ "$AGENT" == "PO" ]]; then
+            echo "action=chain" >> $GITHUB_OUTPUT
+            echo "next_agent=DEV" >> $GITHUB_OUTPUT
+            echo "PO done -> chaining to DEV"
+          elif [[ "$AGENT" == "DEV" ]]; then
+            echo "action=chain" >> $GITHUB_OUTPUT
+            echo "next_agent=TESTER" >> $GITHUB_OUTPUT
+            echo "DEV done -> chaining to TESTER"
+          elif [[ "$AGENT" == "TESTER" ]]; then
+            # Check TESTER verdict via .agent-test-result file
+            if [ -f .agent-test-result ]; then
+              RESULT=$(cat .agent-test-result)
+              echo "Test result: $RESULT"
+              if echo "$RESULT" | grep -qoE '@(PO|DEV)'; then
+                TARGET=$(echo "$RESULT" | grep -oE '@(PO|DEV)' | head -1 | tr -d '@')
+                echo "action=chain" >> $GITHUB_OUTPUT
+                echo "next_agent=$TARGET" >> $GITHUB_OUTPUT
+                echo "TESTER found issues -> chaining to $TARGET"
+              else
+                echo "action=pr" >> $GITHUB_OUTPUT
+                echo "TESTER approved -> creating PR"
+              fi
+            else
+              # No result file - default to approved
+              echo "action=pr" >> $GITHUB_OUTPUT
+              echo "No .agent-test-result file - assuming approved"
+            fi
+          fi
+
+      - name: Chain to next agent
+        if: steps.next.outputs.action == 'chain'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr create \
-            --title "[${{ needs.parse-trigger.outputs.agent_name }}] Session: ${{ needs.run-agent.outputs.temp_branch }}" \
-            --body "## Agent Session
+          BRANCH="${{ needs.run-agent.outputs.working_branch }}"
+          NEXT="${{ steps.next.outputs.next_agent }}"
+          gh workflow run agent-trigger.yml \
+            --ref "$BRANCH" \
+            -f agent_name="$NEXT"
+          echo "Dispatched $NEXT on $BRANCH"
 
-          **Agent:** ${{ needs.parse-trigger.outputs.agent_name }}
-          **Source Branch:** ${{ needs.run-agent.outputs.temp_branch }}
-          **Target Branch:** ${{ github.ref_name }}
-          **Triggered by:** ${{ github.event.head_commit.message }}
+      - name: Create Pull Request
+        if: steps.next.outputs.action == 'pr'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ORIGIN=$(cat .agent-chain-origin 2>/dev/null || echo "master")
+          BRANCH="${{ needs.run-agent.outputs.working_branch }}"
+          gh pr create \
+            --title "[Agent Pipeline] $BRANCH" \
+            --body "## Agent Pipeline Complete
+
+          **Working Branch:** $BRANCH
+          **Target Branch:** $ORIGIN
+          **Pipeline:** PO → DEV → TESTER (approved)
 
           ---
 
           ### Changes
-          This PR contains changes made by the ${{ needs.parse-trigger.outputs.agent_name }} agent.
+          This PR contains the combined work of the PO, DEV, and TESTER agents.
 
           Please review the changes in:
-          - \`agents/${{ needs.parse-trigger.outputs.agent_name }}/history.md\` for session details
+          - \`agents/PO/history.md\` for PO session details
+          - \`agents/DEV/history.md\` for DEV session details
+          - \`agents/TESTER/history.md\` for TESTER session details
 
           ---
           *Generated by TouchFish Agent System*" \
-            --base "${{ github.ref_name }}" \
-            --head "${{ needs.run-agent.outputs.temp_branch }}"
+            --base "$ORIGIN" \
+            --head "$BRANCH"
