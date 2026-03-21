@@ -100,12 +100,82 @@ The README describes a developer tooling project with three core needs:
 
 ---
 
+---
+
+### Session 3 — 2026-03-21
+
+**Trigger:** Commit message `@PO add requirements: global settings target, master permission list with subfiles, auto-install dependencies`
+
+**Task:** Update REQUIREMENT.md to incorporate three new requirements added to README.md since Session 2.
+
+**Inputs Read:**
+- `README.md` — Updated with three new requirements
+- `agents/PO/PO.md` — Role definition (no changes)
+- `agents/PO/history.md` — Sessions 1 and 2 context
+- `REQUIREMENT.md` — Current state (Session 2 output)
+
+**New Requirements Identified:**
+
+1. **Global Settings Target (update to req 2.2, 2.3, 3.1, 3.5, 5.1, 6)**
+   - README: *"The setup script must write permissions to the global Claude settings (~/.claude/settings.json), not a project-level subfolder — so permissions apply across all sessions and working directories"*
+   - This is a significant change from the original assumption in Session 1 which targeted the project-level `.claude/settings.json`
+   - Updated all references throughout REQUIREMENT.md from project-level to global settings path
+   - Added constraint explicitly prohibiting writing to project-level settings
+
+2. **Master Permission List with Subfiles (new req 2.8)**
+   - README: *"There should be a master permission list that aggregates all permissions, with separate subfiles for different permission purposes (e.g. git operations, file editing, GitHub Actions, etc.); the setup script should load and merge all subfiles into the master list"*
+   - This is a structural architecture requirement for how permissions are organized
+   - Two-tier structure: category subfiles (e.g., `permissions/git.json`) + master aggregator
+   - The setup script must dynamically discover and merge subfiles — adding a new category requires only creating a new subfile, not changing the script
+   - Flagged TODO for DEV to define exact directory structure and naming conventions
+
+3. **Dependency Pre-check and Auto-Install (new req 2.9)**
+   - README: *"The setup script must precheck all required dependencies (e.g. jq) at startup and automatically install any that are missing before proceeding"*
+   - Auto-install, not just report — the script must resolve the issue, not just fail
+   - Must detect OS and use appropriate package manager (brew/apt/dnf)
+   - Failed auto-install must exit cleanly with a non-zero code and actionable instructions
+   - List of required dependencies should come from the config file, not be hardcoded in the script
+
+**Key Decisions Made:**
+
+1. **Global vs. project settings:** The global `~/.claude/settings.json` target is a meaningful scope change from Session 1. This implies that permissions configured by this tool apply to all Claude sessions for the user, not just within one project. This is the correct design for a tool meant to reduce repetitive prompts across any project.
+
+2. **Two-tier permission structure:** The master + subfiles architecture enables clean separation of concerns:
+   - Each subfile owns a logical category of permissions (git, file editing, GH Actions, etc.)
+   - The setup script is a generic merger — it doesn't need to know what permissions exist
+   - Teams can extend permissions by adding subfiles without touching the script
+   - This also makes the permission set auditable by category
+
+3. **Auto-install scope:** Auto-install should be attempted silently if the OS is recognized; if not recognized or install fails, the script should fail fast with clear instructions. Silent success is the goal; noisy failure with guidance is the acceptable fallback.
+
+4. **Dependency list in config:** By declaring the required dependencies in the config file rather than hardcoding them in the script, the maintainability principle (change config only, not script) is preserved for dependencies as well as permissions.
+
+**Changes to REQUIREMENT.md:**
+- Updated sections 2.2, 2.3 to reference `~/.claude/settings.json` (global)
+- Added new section 2.8 (Master Permission List with Subfiles)
+- Added new section 2.9 (Dependency Pre-check and Auto-Install)
+- Updated section 3.1 Technology Stack — Target Config Location
+- Updated section 3.5 Constraints — added global-only and no-duplication constraints
+- Updated section 5.1 MVP acceptance criteria — added global scope, subfiles, auto-install criteria
+- Updated section 6 Assumptions — corrected settings path assumption, added dependency and subfile assumptions
+
+**Handoff Notes for DEV:**
+- The global settings path `~/.claude/settings.json` must be used — not `.claude/settings.json` in the project root
+- Define the directory structure for permission subfiles (e.g., `permissions/git.json`, `permissions/file-editing.json`)
+- The setup script must merge subfiles without duplicating permission entries in the final `allow` array
+- Auto-install must handle at minimum: macOS (brew), Debian/Ubuntu (apt), Fedora/RHEL (dnf)
+- Minimum dependencies to check: `jq`, `gh` — DEV to enumerate full list during implementation
+- All three new requirements should be implemented together — they form a cohesive setup architecture
+
+---
+
 ## Change Log
 
 | Date | Session | Change |
 |------|---------|--------|
 | 2026-03-21 | Session 1 | Initial REQUIREMENT.md created for claude-one-key-setup |
 | 2026-03-21 | Session 2 | Added req 2.5 (Edit permission), 2.6 (GH Actions monitoring), 2.7 (branch cleanup on merge) |
+| 2026-03-21 | Session 3 | Updated to global settings target; added req 2.8 (master permission list with subfiles), 2.9 (auto-install dependencies) |
 
 ---
 

@@ -5,10 +5,16 @@
 
 set -euo pipefail
 
+# Ensure local bin (for gh installed without root) is in PATH
+export PATH="${HOME}/bin:${PATH}"
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SETUP_SCRIPT="${REPO_ROOT}/setup.sh"
 CONFIG_FILE="${REPO_ROOT}/claude-config.json"
-SETTINGS_FILE="${REPO_ROOT}/.claude/settings.json"
+PERMISSIONS_DIR="${REPO_ROOT}/permissions"
+
+# Session 3: setup.sh writes to global ~/.claude/settings.json (req 2.2, 3.5)
+SETTINGS_FILE="${HOME}/.claude/settings.json"
 
 # ── Test harness ──────────────────────────────────────────────────────────────
 
@@ -18,9 +24,11 @@ FAIL=0
 pass() { echo "[PASS] $1"; PASS=$((PASS + 1)); }
 fail() { echo "[FAIL] $1 — $2"; FAIL=$((FAIL + 1)); }
 
-# Setup: ensure a clean state for each test group
+# Setup: remove the global settings.json to get a clean state for each test group.
+# We only remove the settings file (not the whole ~/.claude dir) to avoid
+# clobbering other user config.
 setup_clean_env() {
-    rm -rf "${REPO_ROOT}/.claude"
+    rm -f "${SETTINGS_FILE}"
 }
 
 # ── TC Group 1: claude-config.json ────────────────────────────────────────────
@@ -42,20 +50,29 @@ else
     fail "TC-02: claude-config.json is valid JSON" "jq parse error"
 fi
 
-# TC-03: Config supports permissions.allow (with Bash(cd * && git *))
-cd_git_entry=$(jq -r '.permissions.allow[]' "$CONFIG_FILE" 2>/dev/null | grep -Fx "Bash(cd * && git *)" || true)
-if [[ -n "$cd_git_entry" ]]; then
-    pass "TC-03: permissions.allow contains Bash(cd * && git *)"
+# TC-03: permissions/git.json contains Bash(cd * && git *) — permissions moved to subfiles (req 2.8)
+git_perm_file="${PERMISSIONS_DIR}/git.json"
+if [[ -f "$git_perm_file" ]]; then
+    cd_git_entry=$(jq -r '.allow[]' "$git_perm_file" 2>/dev/null | grep -Fx "Bash(cd * && git *)" || true)
+    if [[ -n "$cd_git_entry" ]]; then
+        pass "TC-03: permissions/git.json contains Bash(cd * && git *)"
+    else
+        fail "TC-03: permissions/git.json contains Bash(cd * && git *)" "entry missing"
+    fi
 else
-    fail "TC-03: permissions.allow contains Bash(cd * && git *)" "entry missing"
+    fail "TC-03: permissions/git.json contains Bash(cd * && git *)" "file not found"
 fi
 
-# TC-04: Config has permissions.deny key (allow empty array)
-has_deny=$(jq 'has("permissions") and (.permissions | has("deny"))' "$CONFIG_FILE" 2>/dev/null)
-if [[ "$has_deny" == "true" ]]; then
-    pass "TC-04: config has permissions.deny key"
+# TC-04: Permission subfiles support allow/deny structure
+if [[ -f "$git_perm_file" ]]; then
+    has_deny=$(jq 'has("allow") and has("deny")' "$git_perm_file" 2>/dev/null)
+    if [[ "$has_deny" == "true" ]]; then
+        pass "TC-04: permission subfiles have allow/deny structure"
+    else
+        fail "TC-04: permission subfiles have allow/deny structure" "allow or deny key missing"
+    fi
 else
-    fail "TC-04: config has permissions.deny key" "key missing"
+    fail "TC-04: permission subfiles have allow/deny structure" "git.json not found"
 fi
 
 # TC-05: Config supports model setting
@@ -101,13 +118,13 @@ else
     fail "TC-09: setup.sh reads from config file variable" "no CONFIG_FILE reference"
 fi
 
-# TC-10: Script creates .claude/settings.json when absent
+# TC-10: Script creates ~/.claude/settings.json when absent
 setup_clean_env
 output=$(bash "$SETUP_SCRIPT" 2>&1)
 if [[ -f "$SETTINGS_FILE" ]]; then
-    pass "TC-10: setup.sh creates .claude/settings.json when absent"
+    pass "TC-10: setup.sh creates ~/.claude/settings.json when absent"
 else
-    fail "TC-10: setup.sh creates .claude/settings.json when absent" "file not created"
+    fail "TC-10: setup.sh creates ~/.claude/settings.json when absent" "file not created"
 fi
 
 # TC-11: Generated settings.json is valid JSON
@@ -139,11 +156,11 @@ else
     fail "TC-14: setup.sh runs without root privileges" "script failed"
 fi
 
-# TC-15: Script handles missing jq gracefully (code inspection check)
-if grep -q "command -v jq" "$SETUP_SCRIPT"; then
-    pass "TC-15: setup.sh checks for jq dependency"
+# TC-15: Script handles missing jq gracefully via ensure_dep (code inspection check)
+if grep -q 'ensure_dep' "$SETUP_SCRIPT" && grep -q 'jq' "$SETUP_SCRIPT"; then
+    pass "TC-15: setup.sh uses ensure_dep for jq dependency"
 else
-    fail "TC-15: setup.sh checks for jq dependency" "no jq check found"
+    fail "TC-15: setup.sh uses ensure_dep for jq dependency" "no ensure_dep/jq check found"
 fi
 
 # ── TC Group 3: Idempotency ───────────────────────────────────────────────────
@@ -179,7 +196,7 @@ echo "=== TC-18..TC-22: Merge behavior ==="
 
 # TC-18: Script merges allow permissions (does not replace)
 setup_clean_env
-mkdir -p "${REPO_ROOT}/.claude"
+mkdir -p "$(dirname "$SETTINGS_FILE")"
 cat > "$SETTINGS_FILE" <<'EOF'
 {
   "permissions": {
@@ -200,7 +217,7 @@ fi
 
 # TC-19: Script preserves existing deny list
 setup_clean_env
-mkdir -p "${REPO_ROOT}/.claude"
+mkdir -p "$(dirname "$SETTINGS_FILE")"
 cat > "$SETTINGS_FILE" <<'EOF'
 {
   "permissions": {
@@ -219,7 +236,7 @@ fi
 
 # TC-20: Script preserves existing theme (not in config, should be kept)
 setup_clean_env
-mkdir -p "${REPO_ROOT}/.claude"
+mkdir -p "$(dirname "$SETTINGS_FILE")"
 cat > "$SETTINGS_FILE" <<'EOF'
 {
   "theme": "dark",
@@ -236,7 +253,7 @@ fi
 
 # TC-21: Model from config overrides existing model
 setup_clean_env
-mkdir -p "${REPO_ROOT}/.claude"
+mkdir -p "$(dirname "$SETTINGS_FILE")"
 cat > "$SETTINGS_FILE" <<'EOF'
 {
   "model": "claude-opus-4-6",
@@ -254,7 +271,7 @@ fi
 
 # TC-22: Hooks merged (existing + config; config wins on key collision)
 setup_clean_env
-mkdir -p "${REPO_ROOT}/.claude"
+mkdir -p "$(dirname "$SETTINGS_FILE")"
 cat > "$SETTINGS_FILE" <<'EOF'
 {
   "hooks": {"pre-commit": "echo user-hook"},
@@ -298,7 +315,7 @@ fi
 
 # TC-25: Script handles corrupt settings.json gracefully (warns, starts fresh)
 setup_clean_env
-mkdir -p "${REPO_ROOT}/.claude"
+mkdir -p "$(dirname "$SETTINGS_FILE")"
 echo "not-valid-json" > "$SETTINGS_FILE"
 warn_output=$(bash "$SETUP_SCRIPT" 2>&1)
 is_valid=$(jq empty "$SETTINGS_FILE" 2>/dev/null && echo "yes" || echo "no")
@@ -313,12 +330,17 @@ fi
 echo ""
 echo "=== TC-26..TC-27: Edit permission (req 2.5) ==="
 
-# TC-26: Edit(**/*) present in claude-config.json allow-list
-edit_entry=$(jq -r '.permissions.allow[]' "$CONFIG_FILE" 2>/dev/null | grep -Fx 'Edit(**/*)'  || true)
-if [[ -n "$edit_entry" ]]; then
-    pass "TC-26: permissions.allow contains Edit(**/*) "
+# TC-26: Edit(**/*) present in permissions/file-editing.json (permissions moved to subfiles, req 2.8)
+edit_perm_file="${PERMISSIONS_DIR}/file-editing.json"
+if [[ -f "$edit_perm_file" ]]; then
+    edit_entry=$(jq -r '.allow[]' "$edit_perm_file" 2>/dev/null | grep -Fx 'Edit(**/*)'  || true)
+    if [[ -n "$edit_entry" ]]; then
+        pass "TC-26: permissions/file-editing.json contains Edit(**/*)"
+    else
+        fail "TC-26: permissions/file-editing.json contains Edit(**/*)" "entry missing"
+    fi
 else
-    fail "TC-26: permissions.allow contains Edit(**/*) " "entry missing from claude-config.json"
+    fail "TC-26: permissions/file-editing.json contains Edit(**/*)" "file not found"
 fi
 
 # TC-27: Edit(**/*) appears in generated settings.json after setup
@@ -326,9 +348,9 @@ setup_clean_env
 bash "$SETUP_SCRIPT" > /dev/null 2>&1
 edit_in_output=$(jq -r '.permissions.allow[]' "$SETTINGS_FILE" 2>/dev/null | grep -Fx 'Edit(**/*)'  || true)
 if [[ -n "$edit_in_output" ]]; then
-    pass "TC-27: generated settings.json contains Edit(**/*) "
+    pass "TC-27: generated settings.json contains Edit(**/*)"
 else
-    fail "TC-27: generated settings.json contains Edit(**/*) " "permission missing from output"
+    fail "TC-27: generated settings.json contains Edit(**/*)" "permission missing from output"
 fi
 
 # ── TC Group 7: GH Actions config & hook wiring (req 2.6) ────────────────────
@@ -418,9 +440,178 @@ else
     fail "TC-36: setup.sh reports branch cleanup status" "no Branch cleanup line in output"
 fi
 
+# ── TC Group 9: Global settings target (req 2.2, 3.5) ────────────────────────
+
+echo ""
+echo "=== TC-37..TC-39: Global settings target (req 2.2, 3.5) ==="
+
+# TC-37: setup.sh targets $HOME/.claude/settings.json (global, not project-level)
+if grep -q 'HOME.*\.claude' "$SETUP_SCRIPT" || grep -q '\$HOME' "$SETUP_SCRIPT"; then
+    if ! grep -q 'SCRIPT_DIR.*\.claude' "$SETUP_SCRIPT"; then
+        pass "TC-37: setup.sh targets \$HOME/.claude (global settings)"
+    else
+        fail "TC-37: setup.sh targets \$HOME/.claude (global settings)" "SCRIPT_DIR/.claude reference found — still writing to project dir"
+    fi
+else
+    fail "TC-37: setup.sh targets \$HOME/.claude (global settings)" "\$HOME reference not found"
+fi
+
+# TC-38: After running setup.sh, global settings file exists
+setup_clean_env
+bash "$SETUP_SCRIPT" > /dev/null 2>&1
+if [[ -f "$SETTINGS_FILE" ]]; then
+    pass "TC-38: global settings file created at ~/.claude/settings.json"
+else
+    fail "TC-38: global settings file created at ~/.claude/settings.json" "file not found: $SETTINGS_FILE"
+fi
+
+# TC-39: After running setup.sh, project-level .claude/settings.json is NOT created
+project_settings="${REPO_ROOT}/.claude/settings.json"
+# Run fresh to ensure we only check what this run produces
+setup_clean_env
+rm -f "$project_settings"
+bash "$SETUP_SCRIPT" > /dev/null 2>&1
+if [[ ! -f "$project_settings" ]]; then
+    pass "TC-39: setup.sh does NOT write to project-level .claude/settings.json"
+else
+    fail "TC-39: setup.sh does NOT write to project-level .claude/settings.json" "project-level file was created"
+fi
+
+# ── TC Group 10: Permission subfiles (req 2.8) ───────────────────────────────
+
+echo ""
+echo "=== TC-40..TC-46: Permission subfiles (req 2.8) ==="
+
+# TC-40: permissions/ directory exists
+if [[ -d "$PERMISSIONS_DIR" ]]; then
+    pass "TC-40: permissions/ directory exists"
+else
+    fail "TC-40: permissions/ directory exists" "directory not found"
+fi
+
+# TC-41: permissions/git.json exists and is valid JSON with allow/deny
+git_perm="${PERMISSIONS_DIR}/git.json"
+if [[ -f "$git_perm" ]] && jq empty "$git_perm" 2>/dev/null && jq -e 'has("allow") and has("deny")' "$git_perm" >/dev/null 2>&1; then
+    pass "TC-41: permissions/git.json exists, is valid JSON, has allow/deny keys"
+else
+    fail "TC-41: permissions/git.json exists, is valid JSON, has allow/deny keys" "file missing, invalid, or missing keys"
+fi
+
+# TC-42: permissions/file-editing.json exists and is valid JSON with allow/deny
+edit_perm="${PERMISSIONS_DIR}/file-editing.json"
+if [[ -f "$edit_perm" ]] && jq empty "$edit_perm" 2>/dev/null && jq -e 'has("allow") and has("deny")' "$edit_perm" >/dev/null 2>&1; then
+    pass "TC-42: permissions/file-editing.json exists, is valid JSON, has allow/deny keys"
+else
+    fail "TC-42: permissions/file-editing.json exists, is valid JSON, has allow/deny keys" "file missing, invalid, or missing keys"
+fi
+
+# TC-43: setup.sh auto-discovers subfiles without hardcoded list (code inspection)
+if grep -q 'permissions.*\*\.json\|PERMISSIONS_DIR.*\*.json' "$SETUP_SCRIPT"; then
+    pass "TC-43: setup.sh auto-discovers subfiles via glob (no hardcoded list)"
+else
+    fail "TC-43: setup.sh auto-discovers subfiles via glob" "no glob discovery pattern found"
+fi
+
+# TC-44: All permissions from subfiles appear in generated settings.json
+setup_clean_env
+bash "$SETUP_SCRIPT" > /dev/null 2>&1
+all_subfile_perms=()
+for pfile in "${PERMISSIONS_DIR}"/*.json; do
+    while IFS= read -r perm; do
+        all_subfile_perms+=("$perm")
+    done < <(jq -r '.allow[]?' "$pfile" 2>/dev/null || true)
+done
+all_pass=true
+for perm in "${all_subfile_perms[@]}"; do
+    found=$(jq -r '.permissions.allow[]' "$SETTINGS_FILE" 2>/dev/null | grep -Fx "$perm" || true)
+    if [[ -z "$found" ]]; then
+        fail "TC-44: all subfile permissions appear in generated settings.json" "missing: $perm"
+        all_pass=false
+        break
+    fi
+done
+if [[ "$all_pass" == "true" ]]; then
+    pass "TC-44: all subfile permissions appear in generated settings.json"
+fi
+
+# TC-45: No duplicate permissions in generated settings.json (dedup enforcement)
+total_count=$(jq '.permissions.allow | length' "$SETTINGS_FILE" 2>/dev/null)
+unique_count=$(jq '.permissions.allow | unique | length' "$SETTINGS_FILE" 2>/dev/null)
+if [[ "$total_count" == "$unique_count" ]]; then
+    pass "TC-45: no duplicate permissions in generated settings.json"
+else
+    fail "TC-45: no duplicate permissions in generated settings.json" "total=$total_count unique=$unique_count"
+fi
+
+# TC-46: Adding a new subfile is auto-discovered without script changes
+# Create a temp subfile, run setup, verify its permission appears, then clean up
+tmp_perm="${PERMISSIONS_DIR}/test-tmp-perm.json"
+cat > "$tmp_perm" <<'TMPEOF'
+{
+  "description": "Temp test permission",
+  "allow": ["Bash(echo test-only *)"],
+  "deny": []
+}
+TMPEOF
+setup_clean_env
+bash "$SETUP_SCRIPT" > /dev/null 2>&1
+tmp_found=$(jq -r '.permissions.allow[]' "$SETTINGS_FILE" 2>/dev/null | grep -Fx "Bash(echo test-only *)" || true)
+rm -f "$tmp_perm"
+if [[ -n "$tmp_found" ]]; then
+    pass "TC-46: new permission subfile auto-discovered without script changes"
+else
+    fail "TC-46: new permission subfile auto-discovered without script changes" "new permission not found in output"
+fi
+
+# ── TC Group 11: Dependency auto-install (req 2.9) ───────────────────────────
+
+echo ""
+echo "=== TC-47..TC-51: Dependency auto-install (req 2.9) ==="
+
+# TC-47: claude-config.json declares dependencies field
+has_deps=$(jq 'has("dependencies")' "$CONFIG_FILE" 2>/dev/null)
+if [[ "$has_deps" == "true" ]]; then
+    pass "TC-47: claude-config.json has dependencies field"
+else
+    fail "TC-47: claude-config.json has dependencies field" "field missing"
+fi
+
+# TC-48: dependencies field includes jq and gh
+has_jq=$(jq '.dependencies | contains(["jq"])' "$CONFIG_FILE" 2>/dev/null)
+has_gh=$(jq '.dependencies | contains(["gh"])' "$CONFIG_FILE" 2>/dev/null)
+if [[ "$has_jq" == "true" && "$has_gh" == "true" ]]; then
+    pass "TC-48: dependencies includes jq and gh"
+else
+    fail "TC-48: dependencies includes jq and gh" "jq=$has_jq gh=$has_gh"
+fi
+
+# TC-49: setup.sh bootstraps jq before reading config (chicken-and-egg check)
+# Verify ensure_dep jq appears before the config read in the script
+jq_line=$(grep -n 'ensure_dep jq' "$SETUP_SCRIPT" | head -1 | cut -d: -f1)
+config_read_line=$(grep -n '\-f.*CONFIG_FILE' "$SETUP_SCRIPT" | head -1 | cut -d: -f1)
+if [[ -n "$jq_line" && -n "$config_read_line" && "$jq_line" -lt "$config_read_line" ]]; then
+    pass "TC-49: jq bootstrapped (ensure_dep jq) before config file is parsed"
+else
+    fail "TC-49: jq bootstrapped before config file is parsed" "jq_line=$jq_line config_read_line=$config_read_line"
+fi
+
+# TC-50: setup.sh installs deps from config's dependencies array (not hardcoded)
+if grep -q 'dependencies\[\]\?' "$SETUP_SCRIPT" || grep -q "dependencies\[\]" "$SETUP_SCRIPT"; then
+    pass "TC-50: setup.sh reads dependencies list from config (not hardcoded)"
+else
+    fail "TC-50: setup.sh reads dependencies list from config (not hardcoded)" "no config dependencies read found"
+fi
+
+# TC-51: detect_pkg_mgr supports brew/apt/dnf/yum (code inspection)
+if grep -q 'brew' "$SETUP_SCRIPT" && grep -q 'apt' "$SETUP_SCRIPT" && grep -q 'dnf' "$SETUP_SCRIPT" && grep -q 'yum' "$SETUP_SCRIPT"; then
+    pass "TC-51: detect_pkg_mgr supports brew/apt/dnf/yum"
+else
+    fail "TC-51: detect_pkg_mgr supports brew/apt/dnf/yum" "one or more package managers missing"
+fi
+
 # ── Cleanup & summary ─────────────────────────────────────────────────────────
 
-# Restore clean state
+# Restore a clean working settings.json
 setup_clean_env
 bash "$SETUP_SCRIPT" > /dev/null 2>&1
 

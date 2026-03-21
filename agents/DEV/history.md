@@ -130,12 +130,77 @@
 
 ---
 
+---
+
+### Session 3 — 2026-03-21
+
+**Trigger:** Chain trigger from PO agent (commit `05b1ecf`) — three new requirements: global settings target, master permission list with subfiles, auto-install dependencies
+
+**Task:** Implement requirements 2.2 (global target fix), 2.8 (permission subfiles), and 2.9 (dependency auto-install)
+
+---
+
+#### Thinking Process
+
+1. **Requirements analysis:**
+   - **2.2 Global settings target (bug fix)**: Previous sessions wrote to `${SCRIPT_DIR}/.claude/settings.json` (project-level). Requirements are explicit: target must be `~/.claude/settings.json` (global, across all sessions). Fixed by changing `CLAUDE_DIR` to `$HOME/.claude`.
+   - **2.8 Permission subfiles**: Decided on auto-discovery approach — setup.sh globs all `permissions/*.json` files and merges them. No changes to setup.sh needed when adding new permissions (requirement: "Adding a new permission requires only adding to the appropriate subfile — no changes to the setup script"). Also kept backward-compat: if `permissions` field exists in `claude-config.json`, it is merged in too.
+   - **2.9 Dependency auto-install**: jq is bootstrapped first (hardcoded, since it's needed to parse the config). All other dependencies are read from `claude-config.json`'s `dependencies` field and auto-installed via `install_dep()`. OS detection uses `uname -s` + `/etc/os-release`. Supported: brew (macOS), apt (Debian/Ubuntu), dnf (Fedora), yum (RHEL).
+
+2. **Key design decisions:**
+
+   | Decision | Rationale |
+   |----------|-----------|
+   | `$HOME/.claude` instead of `${SCRIPT_DIR}/.claude` | Requirement 2.2/3.5: global user-level settings apply across all sessions and working directories |
+   | Auto-discover `permissions/*.json` (glob, not explicit list) | Requirement 2.8: "Adding a new permission requires only adding to the appropriate subfile — no changes to the setup script" |
+   | jq bootstrap hardcoded, rest from config | Chicken-and-egg: need jq to parse config before reading the dep list |
+   | `detect_pkg_mgr()` probes `/etc/os-release` then falls back to `command -v` | Handles both named distros and minimal containers that don't have `/etc/os-release` |
+   | Removed `permissions` from `claude-config.json` | All permissions now live in subfiles; `claude-config.json` remains the config/hooks/settings master. Backward compat preserved (setup.sh still merges any `permissions` field if present) |
+
+3. **Permission subfiles created:**
+   - `permissions/git.json`: `Bash(cd * && git *)` — compound cd+git
+   - `permissions/file-editing.json`: `Edit(**/*)"` — file editing
+
+4. **Idempotency verified:** Same merge logic; running twice produces identical output.
+
+---
+
+#### Files Created / Modified
+
+| File | Action | Description |
+|------|--------|-------------|
+| `permissions/git.json` | Created | Permission subfile for git operations |
+| `permissions/file-editing.json` | Created | Permission subfile for file editing |
+| `claude-config.json` | Modified | Removed `permissions` block (moved to subfiles); added `dependencies: ["jq", "gh"]` |
+| `setup.sh` | Modified | Fixed global settings target; added dep auto-install; added subfile discovery |
+| `agents/DEV/history.md` | Updated | This file |
+
+---
+
+#### Acceptance Criteria Coverage (Session 3)
+
+| Criterion | Status |
+|-----------|--------|
+| Settings written to `~/.claude/settings.json` (global) | ✅ Fixed — `CLAUDE_DIR=$HOME/.claude` |
+| Settings NOT written to project-level `.claude/settings.json` | ✅ Fixed |
+| Permissions split into category subfiles | ✅ `permissions/git.json`, `permissions/file-editing.json` |
+| Master aggregation: setup.sh discovers and merges all subfiles | ✅ Auto-discovery via glob |
+| No duplication in merged allow-list | ✅ `unique` filter in `merge_list()` |
+| Adding new permission requires only new subfile (no script changes) | ✅ |
+| Dependency list declared in config file | ✅ `dependencies` field in `claude-config.json` |
+| Missing deps auto-installed (brew/apt/dnf/yum) | ✅ `ensure_dep()` + `install_dep()` |
+| jq bootstrap before config parse | ✅ `ensure_dep jq` called before config read |
+| Clear error + manual instructions if auto-install fails | ✅ `die()` with manual install hints |
+
+---
+
 ## Change Log
 
 | Date | Session | Change |
 |------|---------|--------|
 | 2026-03-21 | 1 | Created `claude-config.json` and `setup.sh` (MVP implementation) |
 | 2026-03-21 | 2 | Added `Edit(**/*)`  permission; GH Actions monitoring hook; branch cleanup via GitHub API |
+| 2026-03-21 | 3 | Fixed global settings target (`~/.claude/settings.json`); added permissions subfiles; added dependency auto-install |
 
 ---
 

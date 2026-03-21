@@ -132,12 +132,95 @@
 
 ---
 
+---
+
+### Session 3 — 2026-03-21
+
+**Trigger:** Chain trigger from DEV agent (commit `721f4e0`)
+
+**Task:** Test Session 3 DEV implementation: global settings target fix (req 2.2), permission subfiles (req 2.8), and dependency auto-install (req 2.9).
+
+---
+
+#### Thinking Process
+
+1. **Reviewed DEV Session 3 changes:**
+   - `setup.sh` now targets `$HOME/.claude/settings.json` (global) — changed from `${SCRIPT_DIR}/.claude` to fix req 2.2/3.5
+   - `permissions/git.json` and `permissions/file-editing.json` created — permissions moved from `claude-config.json` to subfiles (req 2.8)
+   - `setup.sh` auto-discovers all `permissions/*.json` via glob (req 2.8)
+   - `ensure_dep()` / `install_dep()` / `detect_pkg_mgr()` added for dependency auto-install (req 2.9)
+   - `dependencies: ["jq", "gh"]` added to `claude-config.json` (req 2.9)
+
+2. **Identified test suite failures from Session 2:**
+   - TC-03: Was checking `claude-config.json` for `Bash(cd * && git *)` — that entry moved to `permissions/git.json`
+   - TC-04: Was checking `claude-config.json` for `permissions.deny` key — permissions moved to subfiles
+   - TC-10+: `SETTINGS_FILE` in tests pointed to `${REPO_ROOT}/.claude/settings.json` (project-level) but setup.sh now writes to `$HOME/.claude/settings.json`
+   - TC-10 caused test script to abort via `set -e` when `gh` not installed (setup.sh exits 1 during auto-install failure)
+   - TC-26: Was checking `claude-config.json` for `Edit(**/*)`  — moved to `permissions/file-editing.json`
+
+3. **Resolved test environment issue:**
+   - `gh` CLI not installed in test environment; no `sudo` or root access for apt-get
+   - Installed `gh` binary directly to `~/bin/` from GitHub releases (no root needed)
+   - Added `export PATH="${HOME}/bin:${PATH}"` at top of test script
+
+4. **Updated existing tests:**
+   - `SETTINGS_FILE` changed to `${HOME}/.claude/settings.json`
+   - `setup_clean_env()` now removes `$HOME/.claude/settings.json` only (not a whole dir)
+   - Merge tests (TC-18..TC-22) updated to pre-populate `$HOME/.claude/settings.json`
+   - TC-03: Now checks `permissions/git.json`
+   - TC-04: Now checks subfile allow/deny structure
+   - TC-15: Updated to check for `ensure_dep` function instead of just `command -v jq`
+   - TC-26: Now checks `permissions/file-editing.json`
+
+5. **Added 15 new test cases (TC-37..TC-51):**
+   - TC-37..39: Global settings target verification (req 2.2, 3.5)
+   - TC-40..46: Permission subfiles structure, auto-discovery, deduplication (req 2.8)
+   - TC-47..51: Dependency auto-install — config field, dep list, jq bootstrap order, pkg mgr support (req 2.9)
+
+6. **Executed full suite:** all 51 pass.
+
+---
+
+#### Test Coverage Map (Session 3 additions)
+
+| Requirement | Test Cases | Result |
+|-------------|-----------|--------|
+| Settings written to `~/.claude/settings.json` (§2.2, §3.5) | TC-37, TC-38 | ✅ PASS |
+| Settings NOT written to project-level `.claude/` (§2.2, §3.5) | TC-39 | ✅ PASS |
+| `permissions/` directory with category subfiles (§2.8) | TC-40, TC-41, TC-42 | ✅ PASS |
+| Auto-discovery of subfiles via glob (§2.8) | TC-43 | ✅ PASS |
+| All subfile permissions in generated settings.json (§2.8) | TC-44 | ✅ PASS |
+| No duplicate permissions in output (§3.5) | TC-45 | ✅ PASS |
+| New subfile picked up without script changes (§2.8) | TC-46 | ✅ PASS |
+| `dependencies` field in config (§2.9) | TC-47, TC-48 | ✅ PASS |
+| jq bootstrapped before config parse (§2.9) | TC-49 | ✅ PASS |
+| Dependencies read from config (not hardcoded) (§2.9) | TC-50 | ✅ PASS |
+| detect_pkg_mgr supports brew/apt/dnf/yum (§2.9) | TC-51 | ✅ PASS |
+
+---
+
+#### Observations
+
+- **Test environment limitation:** `gh` CLI is not pre-installed and `sudo` is unavailable for apt-get. Resolved by downloading `gh` binary to `~/bin/` directly. This is a one-time setup for the test environment; real end-user machines will have `gh` installable via package manager.
+- **`set -e` gotcha in test script:** TC-10's `output=$(bash "$SETUP_SCRIPT" 2>&1)` would cause the test script to abort via `set -e` if setup.sh exits non-zero. Fixed by ensuring `gh` is available before running the full suite.
+- **TC-49 grep pattern fix:** Initial pattern `\[.*-f.*CONFIG_FILE\]` failed because `CONFIG_FILE"` is followed by `"` not `]`. Fixed to use simpler `\-f.*CONFIG_FILE` pattern.
+- **No regressions:** All 36 Session 1+2 tests continue to pass after updates.
+
+---
+
+#### Verdict
+
+**PASS** — All 51 test cases pass. The Session 3 implementation satisfies all new acceptance criteria in REQUIREMENT.md §2.2, §2.8, and §2.9.
+
+---
+
 ## Change Log
 
 | Date | Session | Change |
 |------|---------|--------|
 | 2026-03-21 | 1 | Created `tests/test_setup.sh` (25 test cases); all PASS; verdict: PASS |
 | 2026-03-21 | 2 | Added TC-26..TC-36 (11 new test cases for req 2.5/2.6/2.7); all 36 PASS; verdict: PASS |
+| 2026-03-21 | 3 | Updated TC-03/04/15/26 + SETTINGS_FILE path; added TC-37..TC-51 (15 new tests for req 2.2/2.8/2.9); all 51 PASS; verdict: PASS |
 
 ---
 

@@ -1,12 +1,6 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(cd * && git *)",
-      "Edit(**/*)"
-    ],
-    "deny": []
-  },
   "model": "claude-sonnet-4-6",
+  "dependencies": ["jq", "gh"],
   "hooks": {
     "PostToolUse": [
       {
