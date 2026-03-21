@@ -308,6 +308,116 @@ else
     fail "TC-25: corrupt settings.json handled gracefully" "warn=${warn_output} valid=${is_valid}"
 fi
 
+# ── TC Group 6: Edit permission (req 2.5) ────────────────────────────────────
+
+echo ""
+echo "=== TC-26..TC-27: Edit permission (req 2.5) ==="
+
+# TC-26: Edit(**/*) present in claude-config.json allow-list
+edit_entry=$(jq -r '.permissions.allow[]' "$CONFIG_FILE" 2>/dev/null | grep -Fx 'Edit(**/*)'  || true)
+if [[ -n "$edit_entry" ]]; then
+    pass "TC-26: permissions.allow contains Edit(**/*) "
+else
+    fail "TC-26: permissions.allow contains Edit(**/*) " "entry missing from claude-config.json"
+fi
+
+# TC-27: Edit(**/*) appears in generated settings.json after setup
+setup_clean_env
+bash "$SETUP_SCRIPT" > /dev/null 2>&1
+edit_in_output=$(jq -r '.permissions.allow[]' "$SETTINGS_FILE" 2>/dev/null | grep -Fx 'Edit(**/*)'  || true)
+if [[ -n "$edit_in_output" ]]; then
+    pass "TC-27: generated settings.json contains Edit(**/*) "
+else
+    fail "TC-27: generated settings.json contains Edit(**/*) " "permission missing from output"
+fi
+
+# ── TC Group 7: GH Actions config & hook wiring (req 2.6) ────────────────────
+
+echo ""
+echo "=== TC-28..TC-33: GH Actions monitoring (req 2.6) ==="
+
+# TC-28: claude-config.json has gh_actions section with required fields
+has_monitor=$(jq 'has("gh_actions") and (.gh_actions | has("monitor")) and (.gh_actions | has("poll_interval_seconds")) and (.gh_actions | has("timeout_minutes"))' "$CONFIG_FILE" 2>/dev/null)
+if [[ "$has_monitor" == "true" ]]; then
+    pass "TC-28: config has gh_actions section with monitor/poll_interval_seconds/timeout_minutes"
+else
+    fail "TC-28: config has gh_actions section" "required fields missing"
+fi
+
+# TC-29: PostToolUse hook referencing gh-actions-monitor.sh wired in claude-config.json
+has_hook=$(jq '.hooks.PostToolUse // [] | .[0].hooks[0].command // ""' "$CONFIG_FILE" 2>/dev/null | grep -q 'gh-actions-monitor.sh' && echo "true" || echo "false")
+if [[ "$has_hook" == "true" ]]; then
+    pass "TC-29: PostToolUse hook references gh-actions-monitor.sh in claude-config.json"
+else
+    fail "TC-29: PostToolUse hook references gh-actions-monitor.sh" "hook not found or command mismatch"
+fi
+
+# TC-30: Monitor script exists and is executable
+MONITOR_SCRIPT="${REPO_ROOT}/scripts/gh-actions-monitor.sh"
+if [[ -x "$MONITOR_SCRIPT" ]]; then
+    pass "TC-30: scripts/gh-actions-monitor.sh exists and is executable"
+else
+    fail "TC-30: scripts/gh-actions-monitor.sh exists and is executable" "missing or not executable"
+fi
+
+# TC-31: Monitor script exits 0 (no-op) for non-push bash commands
+non_push_input='{"tool_input": {"command": "ls -la"}}'
+exit_code=0
+echo "$non_push_input" | bash "$MONITOR_SCRIPT" > /dev/null 2>&1 || exit_code=$?
+if [[ $exit_code -eq 0 ]]; then
+    pass "TC-31: monitor script exits 0 (no-op) for non-push commands"
+else
+    fail "TC-31: monitor script exits 0 for non-push commands" "exit code: $exit_code"
+fi
+
+# TC-32: Monitor script reads poll_interval and timeout from config (code inspection)
+if grep -q 'poll_interval_seconds' "$MONITOR_SCRIPT" && grep -q 'timeout_minutes' "$MONITOR_SCRIPT"; then
+    pass "TC-32: monitor script references poll_interval_seconds and timeout_minutes from config"
+else
+    fail "TC-32: monitor script reads config interval/timeout" "config references missing"
+fi
+
+# TC-33: {SCRIPT_DIR} placeholder is resolved in hook command written to settings.json
+setup_clean_env
+bash "$SETUP_SCRIPT" > /dev/null 2>&1
+hook_cmd=$(jq -r '.hooks.PostToolUse[0].hooks[0].command // ""' "$SETTINGS_FILE" 2>/dev/null)
+if echo "$hook_cmd" | grep -q '{SCRIPT_DIR}'; then
+    fail "TC-33: {SCRIPT_DIR} placeholder resolved in settings.json hook command" "placeholder still present: $hook_cmd"
+elif [[ -z "$hook_cmd" ]]; then
+    fail "TC-33: {SCRIPT_DIR} placeholder resolved in settings.json hook command" "hook command not found in settings.json"
+else
+    pass "TC-33: {SCRIPT_DIR} placeholder resolved to absolute path in settings.json"
+fi
+
+# ── TC Group 8: Branch cleanup config (req 2.7) ───────────────────────────────
+
+echo ""
+echo "=== TC-34..TC-36: Branch cleanup (req 2.7) ==="
+
+# TC-34: claude-config.json has branch_cleanup.delete_on_merge field
+has_branch_cleanup=$(jq 'has("branch_cleanup") and (.branch_cleanup | has("delete_on_merge"))' "$CONFIG_FILE" 2>/dev/null)
+if [[ "$has_branch_cleanup" == "true" ]]; then
+    pass "TC-34: config has branch_cleanup.delete_on_merge field"
+else
+    fail "TC-34: config has branch_cleanup.delete_on_merge field" "field missing"
+fi
+
+# TC-35: setup.sh reports GH Actions monitoring status in summary output
+setup_clean_env
+summary_output=$(bash "$SETUP_SCRIPT" 2>&1)
+if echo "$summary_output" | grep -qi 'GH Actions'; then
+    pass "TC-35: setup.sh reports GH Actions monitoring status in summary"
+else
+    fail "TC-35: setup.sh reports GH Actions monitoring status" "no GH Actions line in output"
+fi
+
+# TC-36: setup.sh reports branch cleanup status in summary output
+if echo "$summary_output" | grep -qi 'Branch cleanup'; then
+    pass "TC-36: setup.sh reports branch cleanup status in summary"
+else
+    fail "TC-36: setup.sh reports branch cleanup status" "no Branch cleanup line in output"
+fi
+
 # ── Cleanup & summary ─────────────────────────────────────────────────────────
 
 # Restore clean state
