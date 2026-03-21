@@ -101,6 +101,41 @@ merged_settings="$(
     '
 )"
 
+# ── Resolve {SCRIPT_DIR} placeholder in hook commands ────────────────────────
+# Hook commands in claude-config.json may reference {SCRIPT_DIR} as a portable
+# placeholder for the absolute path to the project root (where setup.sh lives).
+# Replace it with the actual script directory before writing settings.json.
+
+merged_settings="$(echo "$merged_settings" | sed "s|{SCRIPT_DIR}|${SCRIPT_DIR}|g")"
+
+# ── Configure branch cleanup (delete_branch_on_merge) ────────────────────────
+# If the config enables branch_cleanup.delete_on_merge and gh CLI is available,
+# attempt to set the GitHub repository's delete_branch_on_merge flag via the API.
+# This is the simplest mechanism — GitHub itself handles deletion after each merge.
+
+branch_cleanup_enabled="$(jq -r '.branch_cleanup.delete_on_merge // false' "$CONFIG_FILE")"
+
+if [[ "$branch_cleanup_enabled" == "true" ]]; then
+    if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+        # Detect repo from git remote
+        repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || echo "")"
+        if [[ -n "$repo" ]]; then
+            if gh api "repos/${repo}" --method PATCH \
+                --field delete_branch_on_merge=true \
+                --silent 2>/dev/null; then
+                ok "GitHub repo '${repo}' configured: delete_branch_on_merge=true"
+            else
+                warn "Could not set delete_branch_on_merge on '${repo}' (insufficient permissions?). Configure manually in repo Settings → General."
+            fi
+        else
+            warn "Could not detect GitHub repository. Skipping delete_branch_on_merge configuration."
+        fi
+    else
+        warn "'gh' CLI not available or not authenticated. Skipping delete_branch_on_merge configuration."
+        info "To configure manually: gh api repos/<owner>/<repo> --method PATCH --field delete_branch_on_merge=true"
+    fi
+fi
+
 # ── Write result ──────────────────────────────────────────────────────────────
 
 echo "$merged_settings" | jq '.' > "$SETTINGS_FILE"
@@ -127,4 +162,23 @@ echo ""
 model_val="$(echo "$merged_settings" | jq -r '.model // "(not set)"')"
 echo "  Model         : $model_val"
 echo ""
+
+# Report GH Actions monitoring status
+gh_monitor="$(jq -r '.gh_actions.monitor // false' "$CONFIG_FILE")"
+gh_interval="$(jq -r '.gh_actions.poll_interval_seconds // 15' "$CONFIG_FILE")"
+gh_timeout="$(jq -r '.gh_actions.timeout_minutes // 30' "$CONFIG_FILE")"
+if [[ "$gh_monitor" == "true" ]]; then
+    echo "  GH Actions    : monitoring enabled (poll every ${gh_interval}s, timeout ${gh_timeout}m)"
+else
+    echo "  GH Actions    : monitoring disabled"
+fi
+
+# Report branch cleanup status
+if [[ "$branch_cleanup_enabled" == "true" ]]; then
+    echo "  Branch cleanup: delete_branch_on_merge=true"
+else
+    echo "  Branch cleanup: disabled"
+fi
+echo ""
+
 info "Run 'claude' to start a fully configured session."
