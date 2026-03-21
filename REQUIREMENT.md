@@ -33,21 +33,23 @@ Provide a single script that bootstraps all necessary Claude Code configuration 
 
 ### 2.2 One-Key Setup Script
 
-**Description:** A shell script (e.g., `setup.sh`) that reads the configuration file and applies all settings to the local Claude Code installation.
+**Description:** A shell script (e.g., `setup.sh`) that reads the configuration file and applies all settings to the global Claude Code installation.
 
 **Acceptance Criteria:**
-- [ ] Running the script once fully configures Claude Code for the project
+- [ ] Running the script once fully configures Claude Code globally for the user
 - [ ] Script reads from the central configuration file (not hardcoded values)
-- [ ] Script creates or updates `.claude/settings.json` (or equivalent) with declared permissions and settings
+- [ ] Script creates or updates `~/.claude/settings.json` (global user-level settings) with declared permissions and settings
+- [ ] Script does **not** write to the project-level `.claude/settings.json` — global settings apply across all sessions and working directories
 - [ ] Script is idempotent — running it multiple times produces the same result
 - [ ] Script provides clear output indicating what was configured
+- [ ] Script prechecks all required dependencies at startup and auto-installs any that are missing before proceeding (see req 2.9)
 
 ### 2.3 Auto-Grant Permissions at Session Start
 
 **Description:** Permissions declared in the configuration file are automatically applied when starting a Claude session, eliminating manual approval prompts for pre-approved operations.
 
 **Acceptance Criteria:**
-- [ ] Configured permissions are written to `.claude/settings.json` `permissions.allow` list
+- [ ] Configured permissions are written to `~/.claude/settings.json` `permissions.allow` list (global, not project-level)
 - [ ] Session starts without prompting for any permission in the allow-list
 - [ ] The following permissions are **always** included in the allow-list by default:
   - Compound shell commands combining `cd` and `git` (e.g., `cd <dir> && git <cmd>`) — addresses the "bare repository attack" warning
@@ -95,6 +97,32 @@ Provide a single script that bootstraps all necessary Claude Code configuration 
 - [ ] This behavior applies to all merge events (squash merge, rebase merge, regular merge)
 - [ ] **TODO: DEV to decide implementation approach — post-merge hook vs. GitHub repository setting (`delete_branch_on_merge`) vs. scripted `gh pr merge --delete-branch`**
 
+### 2.8 Master Permission List with Subfiles
+
+**Description:** Permissions are organized into a two-tier structure: category-specific subfiles (e.g., `permissions/git.json`, `permissions/file-editing.json`, `permissions/github-actions.json`) and a master permission list that aggregates all subfile entries. The setup script loads and merges all subfiles into the master list before applying to `~/.claude/settings.json`.
+
+**Acceptance Criteria:**
+- [ ] Permissions are split into separate subfiles organized by purpose/category (e.g., git operations, file editing, GitHub Actions, etc.)
+- [ ] A master permission list file references or aggregates all category subfiles
+- [ ] The setup script discovers and reads all subfiles, merging their permission entries without duplication
+- [ ] Adding a new permission requires only adding to the appropriate subfile — no changes to the setup script
+- [ ] The final merged permission list written to `~/.claude/settings.json` contains all permissions from all subfiles
+- [ ] Subfile format is consistent and human-readable (JSON)
+- [ ] **TODO: DEV to define exact directory structure and file naming conventions for subfiles**
+
+### 2.9 Dependency Pre-check and Auto-Install
+
+**Description:** Before executing any setup logic, the script checks for all required runtime dependencies (e.g., `jq`, `gh`) and automatically installs any that are missing, using the appropriate package manager for the current OS.
+
+**Acceptance Criteria:**
+- [ ] Script checks for all required dependencies at startup before proceeding
+- [ ] If a required dependency is missing, it is automatically installed (not just reported as missing)
+- [ ] Installation uses the appropriate package manager detected from the OS: `brew` (macOS), `apt` (Debian/Ubuntu), `dnf`/`yum` (Fedora/RHEL)
+- [ ] After auto-install, the script continues without requiring the user to re-run
+- [ ] If auto-install fails (e.g., unsupported OS or insufficient permissions), a clear error message and manual install instructions are shown and the script exits with a non-zero code
+- [ ] The list of required dependencies is declared in the configuration file (not hardcoded in the script)
+- [ ] **TODO: DEV to enumerate the full list of required dependencies; at minimum: `jq`, `gh`**
+
 ---
 
 ## 3. Technical Requirements
@@ -105,7 +133,7 @@ Provide a single script that bootstraps all necessary Claude Code configuration 
 |-----------|------------|
 | Setup Script | Bash (POSIX-compatible shell script) |
 | Configuration File | JSON (`.claude/settings.json` compatible) or YAML with JSON conversion |
-| Target Config Location | `.claude/settings.json` in the project root |
+| Target Config Location | `~/.claude/settings.json` (global user-level, applies across all sessions) |
 | Platform | macOS / Linux |
 
 ### 3.2 Claude Code Settings Structure
@@ -142,6 +170,8 @@ The setup script must produce output conforming to this schema.
 - The script must not require elevated (root) privileges
 - The script must not overwrite user-specific settings not declared in the config file (merge, don't replace)
 - The config file must remain compatible with Claude Code's native `settings.json` format
+- The script must target the **global** `~/.claude/settings.json` — never the project-level `.claude/settings.json`
+- Permission subfiles must be merged without duplication — the same permission string must not appear twice in the final allow-list
 
 ---
 
@@ -164,13 +194,15 @@ The setup script must produce output conforming to this schema.
 ## 5. Acceptance Criteria
 
 ### 5.1 MVP
-- [ ] `claude-config.json` (or equivalent) exists with default permissions including the cd+git compound command approval and the Edit subdirectory approval
-- [ ] `setup.sh` script reads config and writes `.claude/settings.json`
+- [ ] `claude-config.json` (or equivalent master config) exists, along with permission subfiles organized by category
+- [ ] `setup.sh` discovers all permission subfiles, merges them into the master list, and writes to `~/.claude/settings.json` (global)
+- [ ] `setup.sh` prechecks and auto-installs all required dependencies before proceeding
 - [ ] After running `setup.sh`, starting a Claude session does not prompt for any pre-approved permission
 - [ ] Compound `cd + git` commands never trigger an approval prompt
 - [ ] Editing files in any subdirectory never triggers an approval prompt
 - [ ] After triggering a GitHub Actions workflow, Claude polls and reports the final status before returning control
 - [ ] After merging a PR, the source branch is automatically deleted
+- [ ] Permissions apply globally (all sessions, all working directories) — not limited to a single project
 
 ### 5.2 Future Enhancements
 - Support for environment-specific permission profiles (e.g., dev vs. CI)
@@ -181,11 +213,13 @@ The setup script must produce output conforming to this schema.
 
 ## 6. Assumptions
 
-- Claude Code stores its project-level settings in `.claude/settings.json` relative to the project root
+- Claude Code stores its global user-level settings in `~/.claude/settings.json` (home directory), and these settings apply across all projects and sessions
 - The permission pattern `Bash(cd * && git *)` (or similar glob syntax) is valid in Claude Code's allow-list — **TODO: DEV to verify exact pattern syntax from Claude Code docs**
-- The setup script targets Unix-like systems; Windows support is out of scope for MVP
+- The setup script targets Unix-like systems (macOS, Linux); Windows support is out of scope for MVP
+- `jq` and `gh` CLI are the primary dependencies; the full dependency list will be determined by DEV during implementation
+- Permission subfiles will be stored in a `permissions/` directory relative to the config file location
 
 ---
 
 *Document maintained by: PO Agent*
-*Last updated: 2026-03-21 (Session 2)*
+*Last updated: 2026-03-21 (Session 3)*
