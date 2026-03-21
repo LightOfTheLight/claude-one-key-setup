@@ -1,0 +1,27 @@
+PASS
+
+All 25 test cases pass. The claude-one-key-setup MVP implementation satisfies all acceptance criteria in REQUIREMENT.md §5.1.
+
+## Test Summary
+
+| Group | Tests | Result |
+|-------|-------|--------|
+| TC-01..07: claude-config.json structure | 7 | PASS |
+| TC-08..15: setup.sh functionality | 8 | PASS |
+| TC-16..17: Idempotency | 2 | PASS |
+| TC-18..22: Merge behavior | 5 | PASS |
+| TC-23..25: Error handling | 3 | PASS |
+| **Total** | **25** | **25 PASS / 0 FAIL** |
+
+## Key Verified Behaviors
+
+- `claude-config.json` exists at repo root, is valid JSON, contains `Bash(cd * && git *)` in allow-list
+- `setup.sh` creates `.claude/settings.json` when absent, with the correct schema
+- Script is idempotent: running 3× produces identical output
+- Merge behavior: existing user permissions, theme, and hooks are preserved; config model overrides existing model
+- Error handling: missing config → [ERROR]; invalid JSON config → [ERROR]; corrupt settings.json → [WARN] + reset gracefully
+- No root privileges required
+
+## Test Script
+
+`tests/test_setup.sh` — automated, runnable test suite (25 tests)
