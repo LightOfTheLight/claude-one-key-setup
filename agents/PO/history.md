@@ -45,11 +45,67 @@ The README describes a developer tooling project with three core needs:
 
 ---
 
+### Session 2 — 2026-03-21
+
+**Trigger:** Commit message `@PO update requirements: edit permission, GH Actions monitoring, branch cleanup on merge`
+
+**Task:** Update REQUIREMENT.md to incorporate three new requirements added to README.md since Session 1.
+
+**Inputs Read:**
+- `README.md` — Updated with three new requirements
+- `agents/PO/PO.md` — Role definition (no changes)
+- `agents/PO/history.md` — Session 1 context
+- `REQUIREMENT.md` — Current state (Session 1 output)
+
+**New Requirements Identified:**
+
+1. **Edit Permission Auto-Approval (req 2.5)**
+   - README: *"Edit file permission for all files inside subfolders of the current working directory — this should always be auto-granted"*
+   - Mapped to: `Edit(**/*)` or equivalent allow-list entry in `.claude/settings.json`
+   - Flagged TODO for DEV to verify exact Edit permission pattern syntax
+
+2. **GitHub Actions Workflow Monitoring (req 2.6)**
+   - README: *"If using GitHub Actions, automatically monitor and poll the workflow status until it reaches a terminal state (success or failure) before handing back to the user"*
+   - This is a behavior requirement, not just a permission
+   - Implementation approach TBD by DEV: could be a hook, a Claude behavior instruction, or a scripted polling loop using `gh run watch`
+   - Added configurable polling interval (default 15s) and timeout (default 30min)
+
+3. **Auto-Delete Source Branch on Merge (req 2.7)**
+   - README: *"For any merge event, automatically delete the source branch after merging"*
+   - Simplest implementation: `gh pr merge --delete-branch` flag or GitHub repo setting `delete_branch_on_merge`
+   - Flagged TODO for DEV to choose implementation approach (hook vs. gh CLI flag vs. API)
+
+**Key Decisions Made:**
+
+1. **Edit permission scope:** Specified as "files inside subfolders" — interpreted as `Edit(**/*)` covering all files recursively within the project, not just the root directory itself. Kept this as a TODO for DEV to confirm exact syntax.
+
+2. **GH Actions monitoring scope:** Scoped to workflows Claude itself triggers (push, PR creation). If no workflow is triggered, behavior is a no-op. This avoids unintended polling of unrelated workflows.
+
+3. **Branch cleanup guard:** Added safety condition — only non-protected branches are deleted. `main` and `master` are explicitly excluded to prevent accidental deletion of base branches.
+
+4. **Separation of concerns:** GH Actions monitoring and branch cleanup are behavioral requirements (how Claude acts), while the permissions are declarative (what Claude is allowed to do). Both need to be reflected in REQUIREMENT.md but may have different implementation mechanisms (hooks vs. settings vs. scripted behavior).
+
+**Changes to REQUIREMENT.md:**
+- Added sections 2.5 (Edit Permission), 2.6 (GH Actions Monitoring), 2.7 (Branch Cleanup)
+- Added sections 3.3 (GH Actions Integration details), 3.4 (Branch Cleanup Integration details)
+- Renumbered old section 3.3 (Constraints) → 3.5
+- Updated MVP acceptance criteria to include all five new items
+- Updated settings schema example to include `Edit(**/*)`
+
+**Handoff Notes for DEV:**
+- Verify exact `Edit` permission pattern syntax in Claude Code allow-list (e.g., `Edit(**/*)` vs. `Edit(*)`)
+- Decide GH Actions monitoring approach: hook-based (post-push hook polling `gh run watch`) vs. Claude instruction in settings
+- Decide branch cleanup approach: `gh pr merge --delete-branch` flag, `gh api` DELETE, or GitHub repository `delete_branch_on_merge` setting
+- GH Actions monitoring and branch cleanup may both leverage Claude Code hooks — DEV should evaluate the hooks system first
+
+---
+
 ## Change Log
 
 | Date | Session | Change |
 |------|---------|--------|
 | 2026-03-21 | Session 1 | Initial REQUIREMENT.md created for claude-one-key-setup |
+| 2026-03-21 | Session 2 | Added req 2.5 (Edit permission), 2.6 (GH Actions monitoring), 2.7 (branch cleanup on merge) |
 
 ---
 

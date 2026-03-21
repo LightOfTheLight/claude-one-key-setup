@@ -1,10 +1,31 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cd * && git *)"
+      "Bash(cd * && git *)",
+      "Edit(**/*)"
     ],
     "deny": []
   },
   "model": "claude-sonnet-4-6",
-  "hooks": {}
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash {SCRIPT_DIR}/scripts/gh-actions-monitor.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "gh_actions": {
+    "monitor": true,
+    "poll_interval_seconds": 15,
+    "timeout_minutes": 30
+  },
+  "branch_cleanup": {
+    "delete_on_merge": true
+  }
 }

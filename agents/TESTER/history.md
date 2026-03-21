@@ -71,11 +71,73 @@
 
 ---
 
+---
+
+### Session 2 — 2026-03-21
+
+**Trigger:** Chain trigger from DEV agent (commit `2241fc9`)
+
+**Task:** Test new DEV Session 2 implementation: Edit permission (req 2.5), GH Actions monitoring hook (req 2.6), and branch cleanup (req 2.7).
+
+---
+
+#### Thinking Process
+
+1. **Checked new DEV changes** — commit `2241fc9` added:
+   - `Edit(**/*)`  to `claude-config.json` allow-list (req 2.5)
+   - `PostToolUse` hook wiring in `claude-config.json` pointing to `scripts/gh-actions-monitor.sh` (req 2.6)
+   - `scripts/gh-actions-monitor.sh` new script: reads stdin tool context, detects git push / gh pr commands, polls GH Actions until terminal state (req 2.6)
+   - `setup.sh` updates: resolves `{SCRIPT_DIR}` placeholder in hook commands; configures `delete_branch_on_merge` via `gh api PATCH`; updated summary output (req 2.7)
+
+2. **Ran existing 25-test suite** — all pass. No regressions.
+
+3. **Added 11 new test cases** (TC-26..TC-36) covering:
+   - TC-26..27: `Edit(**/*)`  in config and generated settings
+   - TC-28..33: GH Actions config section, PostToolUse hook wiring, monitor script existence and behavior
+   - TC-34..36: Branch cleanup config field; summary output reporting
+
+4. **Executed full suite** — all 36 tests pass.
+
+---
+
+#### Test Coverage Map (Session 2 additions)
+
+| Requirement | Test Cases | Result |
+|-------------|-----------|--------|
+| `Edit(**/*)`  in allow-list by default (§2.5) | TC-26, TC-27 | ✅ PASS |
+| `gh_actions` config section with required fields (§2.6) | TC-28 | ✅ PASS |
+| PostToolUse hook wired to monitor script (§2.6) | TC-29 | ✅ PASS |
+| Monitor script exists and is executable (§2.6) | TC-30 | ✅ PASS |
+| Monitor script no-ops for non-push commands (§2.6) | TC-31 | ✅ PASS |
+| Monitor script reads interval/timeout from config (§2.6) | TC-32 | ✅ PASS |
+| `{SCRIPT_DIR}` placeholder resolved in settings.json (§2.6) | TC-33 | ✅ PASS |
+| `branch_cleanup.delete_on_merge` field in config (§2.7) | TC-34 | ✅ PASS |
+| setup.sh reports GH Actions status in summary (§2.6) | TC-35 | ✅ PASS |
+| setup.sh reports branch cleanup status in summary (§2.7) | TC-36 | ✅ PASS |
+
+---
+
+#### Observations
+
+- **`{SCRIPT_DIR}` substitution** (TC-33): The `sed` replacement in `setup.sh` correctly converts the portable placeholder to an absolute path at write time. Verified the output `settings.json` hook command contains no literal `{SCRIPT_DIR}`.
+- **Monitor script no-op coverage** (TC-31): Tested with `ls -la` as the command; script exits 0 without attempting any GH API calls. Live polling behavior not testable without a real GH repo/push, but structural code inspection confirms the polling loop and terminal state handling.
+- **Branch cleanup** (TC-34..36): The `gh api PATCH` approach in `setup.sh` is correctly guarded by `gh auth status` and gracefully warns on failure. The `delete_branch_on_merge=true` config field is present. Live GitHub API calls not testable in this environment, but the logic path is confirmed by code inspection.
+- **No regressions** — all original 25 Session 1 tests continue to pass.
+
+---
+
+#### Verdict
+
+**PASS** — All 36 test cases pass. The Session 2 implementation satisfies all new acceptance criteria in REQUIREMENT.md §2.5, §2.6, and §2.7.
+
+---
+
 ## Change Log
 
 | Date | Session | Change |
 |------|---------|--------|
 | 2026-03-21 | 1 | Created `tests/test_setup.sh` (25 test cases); all PASS; verdict: PASS |
+| 2026-03-21 | 2 | Added TC-26..TC-36 (11 new test cases for req 2.5/2.6/2.7); all 36 PASS; verdict: PASS |
 
 ---
 
