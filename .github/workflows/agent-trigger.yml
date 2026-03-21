@@ -93,7 +93,7 @@ jobs:
             # Store origin branch for final PR
             echo "${{ github.ref_name }}" > .agent-chain-origin
             git add .agent-chain-origin
-            git commit -m "Chain origin: ${{ github.ref_name }}"
+            git diff --staged --quiet || git commit -m "Chain origin: ${{ github.ref_name }}"
             echo "working_branch=$WORKING_BRANCH" >> $GITHUB_OUTPUT
             echo "is_new_branch=true" >> $GITHUB_OUTPUT
             echo "Created branch: $WORKING_BRANCH (origin: ${{ github.ref_name }})"
