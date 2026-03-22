@@ -33,3 +33,6 @@ npm-debug.log*
 # Test coverage
 coverage/
 .nyc_output/
+
+# Claude Code generated settings (produced by setup.sh; not committed)
+.claude/settings.json

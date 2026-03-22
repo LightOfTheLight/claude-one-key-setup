@@ -1,0 +1,7 @@
+{
+  "description": "File editing — allows editing any file within subdirectories of the working directory",
+  "allow": [
+    "Edit(**/*)"
+  ],
+  "deny": []
+}
