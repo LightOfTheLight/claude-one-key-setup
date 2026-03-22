@@ -49,6 +49,20 @@ detect_pkg_mgr() {
     fi
 }
 
+# Run a command with privilege escalation when needed.
+# - As root (uid 0): run directly (no sudo needed)
+# - sudo available: prefix with sudo
+# - Neither: run directly (will fail if privileges are truly required)
+maybe_sudo() {
+    if [[ "$(id -u)" -eq 0 ]]; then
+        "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo "$@"
+    else
+        "$@"
+    fi
+}
+
 # Install a single dependency using the detected package manager.
 install_dep() {
     local dep="$1"
@@ -57,9 +71,9 @@ install_dep() {
     info "Installing '$dep' via ${pkg_mgr}..."
     case "$pkg_mgr" in
         brew) brew install "$dep" ;;
-        apt)  sudo apt-get install -y "$dep" ;;
-        dnf)  sudo dnf install -y "$dep" ;;
-        yum)  sudo yum install -y "$dep" ;;
+        apt)  maybe_sudo apt-get install -y "$dep" ;;
+        dnf)  maybe_sudo dnf install -y "$dep" ;;
+        yum)  maybe_sudo yum install -y "$dep" ;;
         none)
             echo "[ERROR] No supported package manager found (tried brew/apt/dnf/yum)." >&2
             echo "[ERROR] Install '$dep' manually, then re-run setup.sh:" >&2

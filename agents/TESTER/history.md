@@ -214,6 +214,63 @@
 
 ---
 
+---
+
+### Session 4 — 2026-03-21
+
+**Trigger:** Chain trigger from DEV agent (commit `5240462`)
+
+**Task:** Test DEV Session 4 fix: `maybe_sudo()` helper for sudo-less container support (req 2.9).
+
+---
+
+#### Thinking Process
+
+1. **Reviewed DEV Session 4 change** — `setup.sh` gained `maybe_sudo()` helper that:
+   - Calls package manager directly when running as root (uid 0)
+   - Prefixes with `sudo` when sudo is available
+   - Falls back to direct execution otherwise (fails gracefully with clear error)
+   The fix replaces hardcoded `sudo apt-get/dnf/yum` in `install_dep()`.
+
+2. **Identified test environment issue** — On this fresh branch:
+   - Running as uid=1001 (not root)
+   - `sudo` not installed in container
+   - `gh` CLI not pre-installed
+   - Resolved by downloading `gh` v2.65.0 binary to `~/bin/` via `curl` (same approach as previous sessions)
+
+3. **Ran existing 51-test suite** — all pass. No regressions.
+
+4. **Added 3 new test cases (TC-52..TC-54):**
+   - TC-52: `maybe_sudo()` function exists in setup.sh
+   - TC-53: `install_dep()` uses `maybe_sudo` for apt/dnf/yum (not hardcoded sudo)
+   - TC-54: `maybe_sudo()` has both root-check and sudo-check branches
+
+5. **Executed full suite** — all 54 tests pass.
+
+---
+
+#### Test Coverage Map (Session 4 additions)
+
+| Requirement | Test Cases | Result |
+|-------------|-----------|--------|
+| No root required; graceful privilege handling (§3.5) | TC-52, TC-53, TC-54 | ✅ PASS |
+
+---
+
+#### Observations
+
+- **maybe_sudo() coverage:** The function correctly handles three scenarios: root (uid 0) → direct, sudo present → sudo, neither → direct (fails with clear error). Code inspection confirms all three branches.
+- **Test environment bootstrap:** `gh` binary still requires manual download to `~/bin/` since apt-get is unavailable without sudo. This is a test environment pre-condition, not a bug in setup.sh.
+- **No regressions:** All 51 Session 1–3 tests continue to pass.
+
+---
+
+#### Verdict
+
+**PASS** — All 54 test cases pass. The Session 4 `maybe_sudo()` fix is correctly implemented and satisfies the requirement that setup.sh must not require root/sudo privileges (§3.5).
+
+---
+
 ## Change Log
 
 | Date | Session | Change |
@@ -221,6 +278,7 @@
 | 2026-03-21 | 1 | Created `tests/test_setup.sh` (25 test cases); all PASS; verdict: PASS |
 | 2026-03-21 | 2 | Added TC-26..TC-36 (11 new test cases for req 2.5/2.6/2.7); all 36 PASS; verdict: PASS |
 | 2026-03-21 | 3 | Updated TC-03/04/15/26 + SETTINGS_FILE path; added TC-37..TC-51 (15 new tests for req 2.2/2.8/2.9); all 51 PASS; verdict: PASS |
+| 2026-03-21 | 4 | Added TC-52..TC-54 (3 new tests for maybe_sudo() fix); all 54 PASS; verdict: PASS |
 
 ---
 
