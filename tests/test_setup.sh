@@ -641,6 +641,173 @@ else
     fail "TC-54: maybe_sudo() has root-check and sudo-check branches" "one or more branches missing"
 fi
 
+# ── TC Group 13: Windows / winget support (req 2.9, Session 5) ───────────────
+
+echo ""
+echo "=== TC-55..TC-59: Windows/winget support (req 2.9) ==="
+
+# TC-55: detect_pkg_mgr() handles Windows environments via uname -s pattern match
+if grep -q 'MINGW\*' "$SETUP_SCRIPT" && grep -q 'MSYS\*' "$SETUP_SCRIPT" && grep -q 'CYGWIN\*' "$SETUP_SCRIPT"; then
+    pass "TC-55: detect_pkg_mgr() handles MINGW*/MSYS*/CYGWIN* (Git Bash/MSYS2/Cygwin) patterns"
+else
+    fail "TC-55: detect_pkg_mgr() handles Windows environment patterns" "MINGW*/MSYS*/CYGWIN* pattern(s) missing in detect_pkg_mgr()"
+fi
+
+# TC-56: get_winget_id() helper exists and correctly maps jq -> jqlang.jq, gh -> GitHub.cli
+if grep -q 'get_winget_id()' "$SETUP_SCRIPT"; then
+    jq_id=$(grep -A5 'get_winget_id()' "$SETUP_SCRIPT" | grep 'jq)' -A1 | grep 'jqlang\.jq' || true)
+    gh_id=$(grep -A8 'get_winget_id()' "$SETUP_SCRIPT" | grep 'gh)' -A1 | grep 'GitHub\.cli' || true)
+    if [[ -n "$jq_id" && -n "$gh_id" ]]; then
+        pass "TC-56: get_winget_id() maps jq->jqlang.jq and gh->GitHub.cli"
+    else
+        fail "TC-56: get_winget_id() maps jq->jqlang.jq and gh->GitHub.cli" "jq_id='${jq_id}' gh_id='${gh_id}'"
+    fi
+else
+    fail "TC-56: get_winget_id() helper exists" "function not found in setup.sh"
+fi
+
+# TC-57: install_dep() has a winget case using get_winget_id and --silent flags
+has_winget_case=$(grep -A5 'winget)' "$SETUP_SCRIPT" | grep 'winget install' || true)
+has_winget_flags=$(grep 'winget install' "$SETUP_SCRIPT" | grep -- '--silent' || true)
+if [[ -n "$has_winget_case" && -n "$has_winget_flags" ]]; then
+    pass "TC-57: install_dep() has winget case with --silent install flags"
+else
+    fail "TC-57: install_dep() has winget case with --silent install flags" "winget case or --silent flag missing"
+fi
+
+# TC-58: install_dep() has none-windows error path directing to Microsoft Store
+has_none_windows=$(grep 'none-windows)' "$SETUP_SCRIPT" || true)
+has_ms_store_msg=$(grep -i 'Microsoft Store\|App Installer\|microsoft.com/store' "$SETUP_SCRIPT" || true)
+if [[ -n "$has_none_windows" && -n "$has_ms_store_msg" ]]; then
+    pass "TC-58: install_dep() has none-windows path with Microsoft Store instructions"
+else
+    fail "TC-58: install_dep() has none-windows path with Microsoft Store instructions" "none-windows='${has_none_windows:-missing}' ms_store='${has_ms_store_msg:-missing}'"
+fi
+
+# TC-59: detect_pkg_mgr() returns 'none-windows' when on Windows without winget
+# (Code inspection: case block should echo 'none-windows' in the Windows section)
+has_none_windows_return=$(grep 'echo "none-windows"' "$SETUP_SCRIPT" || grep "echo 'none-windows'" "$SETUP_SCRIPT" || true)
+if [[ -n "$has_none_windows_return" ]]; then
+    pass "TC-59: detect_pkg_mgr() emits 'none-windows' return value when winget not available"
+else
+    fail "TC-59: detect_pkg_mgr() emits 'none-windows' return value" "echo none-windows not found"
+fi
+
+# ── TC Group 14: Default working directory (req 2.10, Session 5) ─────────────
+
+echo ""
+echo "=== TC-60..TC-68: Default working directory (req 2.10) ==="
+
+# TC-60: setup.sh reads default_working_dir from config (code inspection)
+if grep -q 'default_working_dir' "$SETUP_SCRIPT"; then
+    pass "TC-60: setup.sh references default_working_dir (reads from config)"
+else
+    fail "TC-60: setup.sh references default_working_dir" "field not referenced in setup.sh"
+fi
+
+# TC-61: When default_working_dir is set in config, setup.sh writes it to settings.json
+# Use a temp copy of claude-config.json with the field added
+tmp_config="${CONFIG_FILE}.bak"
+cp "$CONFIG_FILE" "$tmp_config"
+jq '. + {"default_working_dir": "/tmp/test-workdir"}' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+setup_clean_env
+bash "$SETUP_SCRIPT" > /dev/null 2>&1
+workdir_in_settings=$(jq -r '.default_working_dir // empty' "$SETTINGS_FILE" 2>/dev/null)
+cp "$tmp_config" "$CONFIG_FILE"
+rm -f "$tmp_config"
+if [[ "$workdir_in_settings" == "/tmp/test-workdir" ]]; then
+    pass "TC-61: default_working_dir from config written to settings.json"
+else
+    fail "TC-61: default_working_dir from config written to settings.json" "got: '${workdir_in_settings}'"
+fi
+
+# TC-62: When default_working_dir is set, UserPromptSubmit hook is injected in settings.json
+tmp_config2="${CONFIG_FILE}.bak2"
+cp "$CONFIG_FILE" "$tmp_config2"
+jq '. + {"default_working_dir": "/tmp/test-workdir"}' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+setup_clean_env
+bash "$SETUP_SCRIPT" > /dev/null 2>&1
+has_userprompt_hook=$(jq -r '.hooks.UserPromptSubmit // [] | length' "$SETTINGS_FILE" 2>/dev/null)
+cp "$tmp_config2" "$CONFIG_FILE"
+rm -f "$tmp_config2"
+if [[ "$has_userprompt_hook" -gt 0 ]]; then
+    pass "TC-62: UserPromptSubmit hook injected when default_working_dir is set"
+else
+    fail "TC-62: UserPromptSubmit hook injected when default_working_dir is set" "UserPromptSubmit hook not found (count: ${has_userprompt_hook})"
+fi
+
+# TC-63: When default_working_dir is NOT set (current config has no field), no UserPromptSubmit workdir hook
+setup_clean_env
+bash "$SETUP_SCRIPT" > /dev/null 2>&1
+workdir_hook_count=$(jq -r '.hooks.UserPromptSubmit // [] | length' "$SETTINGS_FILE" 2>/dev/null)
+if [[ "$workdir_hook_count" -eq 0 ]]; then
+    pass "TC-63: no UserPromptSubmit hook when default_working_dir is not configured"
+else
+    fail "TC-63: no UserPromptSubmit hook when default_working_dir is not configured" "UserPromptSubmit hook found unexpectedly (count: ${workdir_hook_count})"
+fi
+
+# TC-64: scripts/workdir-prompt.sh exists and is executable
+WORKDIR_SCRIPT="${REPO_ROOT}/scripts/workdir-prompt.sh"
+if [[ -x "$WORKDIR_SCRIPT" ]]; then
+    pass "TC-64: scripts/workdir-prompt.sh exists and is executable"
+else
+    fail "TC-64: scripts/workdir-prompt.sh exists and is executable" "missing or not executable"
+fi
+
+# TC-65: workdir-prompt.sh is a no-op (exits 0, no output) when settings.json has no default_working_dir
+tmp_settings="${HOME}/.claude/settings.json.bak65"
+cp "$SETTINGS_FILE" "$tmp_settings" 2>/dev/null || true
+# Ensure settings.json has no default_working_dir
+echo '{"permissions":{"allow":[],"deny":[]}}' > "$SETTINGS_FILE"
+workdir_output=$(bash "$WORKDIR_SCRIPT" 2>&1)
+workdir_exit=$?
+cp "$tmp_settings" "$SETTINGS_FILE" 2>/dev/null || setup_clean_env
+rm -f "$tmp_settings"
+if [[ $workdir_exit -eq 0 && -z "$workdir_output" ]]; then
+    pass "TC-65: workdir-prompt.sh is a no-op (exit 0, no output) when default_working_dir not set"
+else
+    fail "TC-65: workdir-prompt.sh is a no-op when default_working_dir not set" "exit=${workdir_exit} output='${workdir_output}'"
+fi
+
+# TC-66: workdir-prompt.sh outputs a scoping reminder when default_working_dir is set in settings.json
+tmp_settings66="${HOME}/.claude/settings.json.bak66"
+cp "$SETTINGS_FILE" "$tmp_settings66" 2>/dev/null || true
+echo '{"default_working_dir":"/srv/myproject","permissions":{"allow":[],"deny":[]}}' > "$SETTINGS_FILE"
+workdir_reminder=$(bash "$WORKDIR_SCRIPT" 2>&1)
+cp "$tmp_settings66" "$SETTINGS_FILE" 2>/dev/null || setup_clean_env
+rm -f "$tmp_settings66"
+if echo "$workdir_reminder" | grep -q '/srv/myproject'; then
+    pass "TC-66: workdir-prompt.sh outputs reminder containing configured working directory path"
+else
+    fail "TC-66: workdir-prompt.sh outputs reminder with working directory path" "output: '${workdir_reminder}'"
+fi
+
+# TC-67: setup.sh summary reports working directory status
+setup_clean_env
+summary_workdir=$(bash "$SETUP_SCRIPT" 2>&1)
+if echo "$summary_workdir" | grep -qi 'Working dir'; then
+    pass "TC-67: setup.sh summary output reports working directory status"
+else
+    fail "TC-67: setup.sh summary output reports working directory status" "no 'Working dir' line in summary"
+fi
+
+# TC-68: Idempotency with default_working_dir: two runs produce identical settings.json
+tmp_config68="${CONFIG_FILE}.bak68"
+cp "$CONFIG_FILE" "$tmp_config68"
+jq '. + {"default_working_dir": "/tmp/idempotent-workdir"}' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+setup_clean_env
+bash "$SETUP_SCRIPT" > /dev/null 2>&1
+content_wd_run1=$(cat "$SETTINGS_FILE")
+bash "$SETUP_SCRIPT" > /dev/null 2>&1
+content_wd_run2=$(cat "$SETTINGS_FILE")
+cp "$tmp_config68" "$CONFIG_FILE"
+rm -f "$tmp_config68"
+if [[ "$content_wd_run1" == "$content_wd_run2" ]]; then
+    pass "TC-68: idempotent with default_working_dir — two runs produce identical settings.json"
+else
+    fail "TC-68: idempotent with default_working_dir — two runs produce identical settings.json" "settings differ between runs"
+fi
+
 # ── Cleanup & summary ─────────────────────────────────────────────────────────
 
 # Restore a clean working settings.json
