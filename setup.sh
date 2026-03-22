@@ -25,10 +25,21 @@ die()   { echo "[ERROR] $*" >&2; exit 1; }
 
 # Detect the available system package manager.
 detect_pkg_mgr() {
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        command -v brew >/dev/null 2>&1 && echo "brew" || echo "none"
-        return
-    fi
+    local os
+    os="$(uname -s)"
+    case "$os" in
+        MINGW*|MSYS*|CYGWIN*)
+            # Windows (Git Bash / MSYS2 / Cygwin)
+            if command -v winget >/dev/null 2>&1; then
+                echo "winget"
+            else
+                echo "none-windows"
+            fi
+            return ;;
+        Darwin)
+            command -v brew >/dev/null 2>&1 && echo "brew" || echo "none"
+            return ;;
+    esac
     # Linux: inspect /etc/os-release for distro-specific manager
     if [[ -f /etc/os-release ]]; then
         local os_id
@@ -47,6 +58,15 @@ detect_pkg_mgr() {
     elif command -v yum     >/dev/null 2>&1; then echo "yum"
     else echo "none"
     fi
+}
+
+# Map a generic package name to its winget package ID.
+get_winget_id() {
+    case "$1" in
+        jq) echo "jqlang.jq" ;;
+        gh) echo "GitHub.cli" ;;
+        *)  echo "$1" ;;
+    esac
 }
 
 # Run a command with privilege escalation when needed.
@@ -70,13 +90,35 @@ install_dep() {
     pkg_mgr="$(detect_pkg_mgr)"
     info "Installing '$dep' via ${pkg_mgr}..."
     case "$pkg_mgr" in
-        brew) brew install "$dep" ;;
-        apt)  maybe_sudo apt-get install -y "$dep" ;;
-        dnf)  maybe_sudo dnf install -y "$dep" ;;
-        yum)  maybe_sudo yum install -y "$dep" ;;
+        brew)   brew install "$dep" ;;
+        apt)    maybe_sudo apt-get install -y "$dep" ;;
+        dnf)    maybe_sudo dnf install -y "$dep" ;;
+        yum)    maybe_sudo yum install -y "$dep" ;;
+        winget)
+            local winget_id
+            winget_id="$(get_winget_id "$dep")"
+            info "Installing '$dep' via winget (id: ${winget_id})..."
+            winget install --id "$winget_id" --silent \
+                --accept-package-agreements --accept-source-agreements
+            # winget may not update PATH for the current session; refresh common location
+            local winget_links="${LOCALAPPDATA}/Microsoft/WinGet/Links"
+            if [[ -d "$winget_links" ]]; then
+                export PATH="${winget_links}:${PATH}"
+            fi
+            ;;
+        none-windows)
+            echo "[ERROR] winget is not available on this Windows system." >&2
+            echo "[ERROR] Install App Installer (winget) from the Microsoft Store," >&2
+            echo "[ERROR] then re-run setup.sh." >&2
+            echo "[ERROR] Alternatively, install '$dep' manually:" >&2
+            local winget_id
+            winget_id="$(get_winget_id "$dep")"
+            echo "[ERROR]   winget install --id ${winget_id}" >&2
+            return 1 ;;
         none)
-            echo "[ERROR] No supported package manager found (tried brew/apt/dnf/yum)." >&2
+            echo "[ERROR] No supported package manager found (tried brew/apt/dnf/yum/winget)." >&2
             echo "[ERROR] Install '$dep' manually, then re-run setup.sh:" >&2
+            echo "[ERROR]   Windows: winget install --id $(get_winget_id "$dep")" >&2
             echo "[ERROR]   macOS  : brew install $dep" >&2
             echo "[ERROR]   Debian : sudo apt-get install $dep" >&2
             echo "[ERROR]   Fedora : sudo dnf install $dep" >&2
@@ -204,8 +246,24 @@ merged_settings="$(
     | .hooks = (($existing.hooks // {}) + ($config.hooks // {}))
     | .permissions.allow = $allow
     | .permissions.deny  = $deny
+    | if ($config | has("default_working_dir") and ($config.default_working_dir | . != null and . != ""))
+      then .default_working_dir = $config.default_working_dir
+      else . end
     '
 )"
+
+# ── Apply default_working_dir hook (req 2.10) ────────────────────────────────
+# If default_working_dir is configured, inject a UserPromptSubmit hook that
+# reminds Claude to scope all operations to that directory.
+
+workdir="$(jq -r '.default_working_dir // empty' "$CONFIG_FILE" 2>/dev/null || true)"
+if [[ -n "$workdir" ]]; then
+    info "Applying default working directory: $workdir"
+    workdir_hook_cmd="bash ${SCRIPT_DIR}/scripts/workdir-prompt.sh"
+    merged_settings="$(echo "$merged_settings" | jq \
+        --arg cmd "$workdir_hook_cmd" \
+        '.hooks.UserPromptSubmit = [{"hooks": [{"type": "command", "command": $cmd}]}]')"
+fi
 
 # ── Resolve {SCRIPT_DIR} placeholder in hook commands ────────────────────────
 
@@ -275,6 +333,13 @@ if [[ "$branch_cleanup_enabled" == "true" ]]; then
     echo "  Branch cleanup: delete_branch_on_merge=true"
 else
     echo "  Branch cleanup: disabled"
+fi
+
+workdir_val="$(jq -r '.default_working_dir // empty' "$CONFIG_FILE" 2>/dev/null || true)"
+if [[ -n "$workdir_val" ]]; then
+    echo "  Working dir   : $workdir_val"
+else
+    echo "  Working dir   : (not set — uses Claude launch directory)"
 fi
 echo ""
 

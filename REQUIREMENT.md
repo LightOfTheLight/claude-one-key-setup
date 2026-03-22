@@ -117,11 +117,28 @@ Provide a single script that bootstraps all necessary Claude Code configuration 
 **Acceptance Criteria:**
 - [ ] Script checks for all required dependencies at startup before proceeding
 - [ ] If a required dependency is missing, it is automatically installed (not just reported as missing)
-- [ ] Installation uses the appropriate package manager detected from the OS: `brew` (macOS), `apt` (Debian/Ubuntu), `dnf`/`yum` (Fedora/RHEL)
+- [ ] Installation uses the appropriate package manager detected from the OS:
+  - `winget` (Windows): `winget install jqlang.jq`, `winget install GitHub.cli`
+  - `brew` (macOS): `brew install jq gh`
+  - `apt` (Debian/Ubuntu): `sudo apt-get install jq gh`
+  - `dnf`/`yum` (Fedora/RHEL)
 - [ ] After auto-install, the script continues without requiring the user to re-run
 - [ ] If auto-install fails (e.g., unsupported OS or insufficient permissions), a clear error message and manual install instructions are shown and the script exits with a non-zero code
+- [ ] On Windows, if `winget` is not available, an error message directs the user to install via the Microsoft Store App Installer before re-running
 - [ ] The list of required dependencies is declared in the configuration file (not hardcoded in the script)
 - [ ] **TODO: DEV to enumerate the full list of required dependencies; at minimum: `jq`, `gh`**
+
+### 2.10 Default Working Directory
+
+**Description:** A default working directory can be declared in `claude-config.json`. When configured, all file operations, git commands, and agent-invoked scripts resolve paths relative to this directory — regardless of the directory from which Claude is launched.
+
+**Acceptance Criteria:**
+- [ ] `claude-config.json` supports a `default_working_dir` field accepting an absolute path
+- [ ] When `default_working_dir` is set, all file edits, git commands, and agent actions are scoped to that directory
+- [ ] Behavior is consistent regardless of the directory from which `claude` is launched
+- [ ] When `default_working_dir` is not set, behavior falls back to the standard working directory (no change from current behavior)
+- [ ] The setup script reads `default_working_dir` from the config and applies it appropriately (e.g., via hooks or Claude settings)
+- [ ] **TODO: DEV to determine the exact mechanism for enforcing the working directory (e.g., hooks that `cd` to the configured path at session start, or a Claude Code settings field if one exists)**
 
 ---
 
@@ -134,7 +151,7 @@ Provide a single script that bootstraps all necessary Claude Code configuration 
 | Setup Script | Bash (POSIX-compatible shell script) |
 | Configuration File | JSON (`.claude/settings.json` compatible) or YAML with JSON conversion |
 | Target Config Location | `~/.claude/settings.json` (global user-level, applies across all sessions) |
-| Platform | macOS / Linux |
+| Platform | macOS / Linux / Windows (winget) |
 
 ### 3.2 Claude Code Settings Structure
 
@@ -196,13 +213,14 @@ The setup script must produce output conforming to this schema.
 ### 5.1 MVP
 - [ ] `claude-config.json` (or equivalent master config) exists, along with permission subfiles organized by category
 - [ ] `setup.sh` discovers all permission subfiles, merges them into the master list, and writes to `~/.claude/settings.json` (global)
-- [ ] `setup.sh` prechecks and auto-installs all required dependencies before proceeding
+- [ ] `setup.sh` prechecks and auto-installs all required dependencies before proceeding, using the OS-appropriate package manager (winget / brew / apt / dnf)
 - [ ] After running `setup.sh`, starting a Claude session does not prompt for any pre-approved permission
 - [ ] Compound `cd + git` commands never trigger an approval prompt
 - [ ] Editing files in any subdirectory never triggers an approval prompt
 - [ ] After triggering a GitHub Actions workflow, Claude polls and reports the final status before returning control
 - [ ] After merging a PR, the source branch is automatically deleted
 - [ ] Permissions apply globally (all sessions, all working directories) — not limited to a single project
+- [ ] When `default_working_dir` is configured in `claude-config.json`, all agent operations are scoped to that directory regardless of Claude's launch directory
 
 ### 5.2 Future Enhancements
 - Support for environment-specific permission profiles (e.g., dev vs. CI)
@@ -215,11 +233,13 @@ The setup script must produce output conforming to this schema.
 
 - Claude Code stores its global user-level settings in `~/.claude/settings.json` (home directory), and these settings apply across all projects and sessions
 - The permission pattern `Bash(cd * && git *)` (or similar glob syntax) is valid in Claude Code's allow-list — **TODO: DEV to verify exact pattern syntax from Claude Code docs**
-- The setup script targets Unix-like systems (macOS, Linux); Windows support is out of scope for MVP
+- The setup script targets Unix-like systems (macOS, Linux) as primary platforms; Windows support via `winget` is included in MVP scope
+- On Windows, `winget` is the supported package manager; if not available, the user must install it via the Microsoft Store App Installer before running the script
 - `jq` and `gh` CLI are the primary dependencies; the full dependency list will be determined by DEV during implementation
 - Permission subfiles will be stored in a `permissions/` directory relative to the config file location
+- The `default_working_dir` feature relies on a mechanism available at Claude session start (e.g., hooks) — DEV to confirm feasibility and implementation approach
 
 ---
 
 *Document maintained by: PO Agent*
-*Last updated: 2026-03-21 (Session 3)*
+*Last updated: 2026-03-22 (Session 4)*

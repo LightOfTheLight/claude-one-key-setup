@@ -169,6 +169,62 @@ The README describes a developer tooling project with three core needs:
 
 ---
 
+---
+
+### Session 4 — 2026-03-22
+
+**Trigger:** Commit message `Update README: add Windows winget dependency install and default working directory requirement @PO`
+
+**Task:** Update REQUIREMENT.md to incorporate two new requirements added to README.md since Session 3.
+
+**Inputs Read:**
+- `README.md` — Updated with Windows winget support and default working directory requirement
+- `agents/PO/PO.md` — Role definition (no changes)
+- `agents/PO/history.md` — Sessions 1–3 context
+- `REQUIREMENT.md` — Current state (Session 3 output)
+
+**New Requirements Identified:**
+
+1. **Windows/winget Support in Dependency Auto-Install (update to req 2.9)**
+   - README: New Dependencies table adds Windows row with `winget` as the package manager
+   - Specific install commands documented: `winget install jqlang.jq`, `winget install GitHub.cli`
+   - Fallback documented: if winget not available, user directed to Microsoft Store App Installer
+   - Updated req 2.9 acceptance criteria to include Windows/winget path alongside macOS/brew/apt/dnf
+   - Updated section 3.1 Technology Stack Platform field to include Windows (winget)
+   - Updated Assumptions to remove "Windows out of scope" — Windows is now in MVP scope
+
+2. **Default Working Directory (new req 2.10)**
+   - README: *"A default working directory must be configurable; all file operations, git commands, and agent actions must be scoped to that directory regardless of the directory from which Claude is launched"*
+   - Config key: `default_working_dir` in `claude-config.json`, accepts an absolute path
+   - When unset, no behavior change (backward compatible)
+   - Implementation mechanism TBD by DEV — likely a hook that enforces `cd` to the configured path at session start
+   - Added to MVP acceptance criteria
+
+**Key Decisions Made:**
+
+1. **Windows as MVP scope:** The README explicitly documents Windows winget support with specific install commands, making this an in-MVP requirement rather than a post-MVP enhancement. Updated assumption accordingly — Windows is no longer "out of scope."
+
+2. **winget fallback:** If winget is not installed on Windows, the script cannot auto-install it (winget bootstraps itself via the App Installer package). The only option is to direct the user to install it manually. This edge case is explicitly documented in the acceptance criteria.
+
+3. **Default working directory scope:** This is a session-wide behavior change — all operations must resolve to the configured directory. The most natural Claude Code implementation would be a session-start hook that changes directory. DEV needs to confirm whether Claude Code's hook system can enforce this reliably, or if a settings field exists for this purpose.
+
+4. **Default working directory opt-in:** When `default_working_dir` is absent from the config, behavior is unchanged. This ensures backward compatibility and avoids breaking existing setups.
+
+**Changes to REQUIREMENT.md:**
+- Updated section 2.9 (Dependency Auto-Install) — added Windows/winget acceptance criteria and winget fallback
+- Added new section 2.10 (Default Working Directory)
+- Updated section 3.1 Technology Stack — Platform now includes Windows (winget)
+- Updated section 5.1 MVP — added auto-install package manager note and `default_working_dir` acceptance criterion
+- Updated section 6 Assumptions — removed Windows out-of-scope assumption; added winget and default_working_dir assumptions
+
+**Handoff Notes for DEV:**
+- Windows auto-install path: detect OS → use `winget install jqlang.jq` and `winget install GitHub.cli`; if winget missing, exit with Microsoft Store App Installer URL
+- Verify whether Bash scripts run on Windows (Git Bash / WSL) or if a separate PowerShell script is needed for Windows users
+- Determine enforcement mechanism for `default_working_dir` — likely a hooks-based `cd` at session start; investigate if Claude Code has a native setting for this
+- When `default_working_dir` is absent, no change in behavior should occur
+
+---
+
 ## Change Log
 
 | Date | Session | Change |
@@ -176,6 +232,7 @@ The README describes a developer tooling project with three core needs:
 | 2026-03-21 | Session 1 | Initial REQUIREMENT.md created for claude-one-key-setup |
 | 2026-03-21 | Session 2 | Added req 2.5 (Edit permission), 2.6 (GH Actions monitoring), 2.7 (branch cleanup on merge) |
 | 2026-03-21 | Session 3 | Updated to global settings target; added req 2.8 (master permission list with subfiles), 2.9 (auto-install dependencies) |
+| 2026-03-22 | Session 4 | Added Windows/winget support to req 2.9; added req 2.10 (default working directory) |
 
 ---
 
