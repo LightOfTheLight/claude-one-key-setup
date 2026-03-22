@@ -271,6 +271,76 @@
 
 ---
 
+---
+
+### Session 5 — 2026-03-22
+
+**Trigger:** Chain trigger from DEV agent (commit `50aece1`)
+
+**Task:** Test DEV Session 5 implementation: Windows winget support (req 2.9) and default working directory (req 2.10).
+
+---
+
+#### Thinking Process
+
+1. **Reviewed DEV Session 5 changes** — commit `50aece1` added:
+   - `detect_pkg_mgr()` extended with `MINGW*|MSYS*|CYGWIN*` case for Windows (req 2.9)
+   - `get_winget_id()` helper mapping generic names to winget IDs (`jq`→`jqlang.jq`, `gh`→`GitHub.cli`) (req 2.9)
+   - `install_dep()` `winget` case with `--silent --accept-*` flags + PATH refresh (req 2.9)
+   - `install_dep()` `none-windows` error path directing to Microsoft Store (req 2.9)
+   - `setup.sh` reads `default_working_dir` from config, stores in `settings.json`, injects `UserPromptSubmit` hook when set (req 2.10)
+   - `scripts/workdir-prompt.sh`: new `UserPromptSubmit` hook script emitting scoping reminder (req 2.10)
+   - Summary output updated with working directory status line (req 2.10)
+
+2. **Ran existing 54-test suite** — all pass. No regressions.
+
+3. **Added 14 new test cases (TC-55..TC-68):**
+   - TC-55..TC-59: Windows/winget support (code inspection — Linux test environment)
+   - TC-60..TC-68: Default working directory — config reading, settings.json write, hook injection, no-op fallback, workdir-prompt.sh behavior, idempotency
+
+4. **Test environment** — `gh` not pre-installed; downloaded to `~/bin/` via `curl` (same approach as Sessions 3 & 4). Config modification for TC-61/62/68 uses `jq` since `python3` is not available in this environment.
+
+5. **Executed full suite** — all 68 pass.
+
+---
+
+#### Test Coverage Map (Session 5 additions)
+
+| Requirement | Test Cases | Result |
+|-------------|-----------|--------|
+| Windows detection via uname MINGW*/MSYS*/CYGWIN* (§2.9) | TC-55 | ✅ PASS |
+| get_winget_id() maps jq→jqlang.jq, gh→GitHub.cli (§2.9) | TC-56 | ✅ PASS |
+| install_dep() winget case with --silent flags (§2.9) | TC-57 | ✅ PASS |
+| none-windows path with Microsoft Store instructions (§2.9) | TC-58 | ✅ PASS |
+| detect_pkg_mgr() emits 'none-windows' return value (§2.9) | TC-59 | ✅ PASS |
+| setup.sh reads default_working_dir from config (§2.10) | TC-60 | ✅ PASS |
+| default_working_dir written to settings.json when set (§2.10) | TC-61 | ✅ PASS |
+| UserPromptSubmit hook injected when default_working_dir set (§2.10) | TC-62 | ✅ PASS |
+| No UserPromptSubmit hook when default_working_dir unset (§2.10) | TC-63 | ✅ PASS |
+| scripts/workdir-prompt.sh exists and is executable (§2.10) | TC-64 | ✅ PASS |
+| workdir-prompt.sh no-op when default_working_dir not in settings (§2.10) | TC-65 | ✅ PASS |
+| workdir-prompt.sh outputs reminder with directory path (§2.10) | TC-66 | ✅ PASS |
+| setup.sh summary reports working directory status (§2.10) | TC-67 | ✅ PASS |
+| Idempotency with default_working_dir (§2.10, §2.2) | TC-68 | ✅ PASS |
+
+---
+
+#### Observations
+
+- **Windows testing (TC-55..59):** All tests are code inspection only — no live winget available on Linux. The pattern matching (`MINGW*|MSYS*|CYGWIN*`), ID mappings, install flags, and error paths are verified by scanning setup.sh source. Live verification would require a Windows environment with Git Bash.
+- **default_working_dir not in current template:** `claude-config.json` does not include `default_working_dir` by default (correct — it's an optional field). TC-61/62/68 use a temp config with the field injected via `jq` to test the feature path. TC-63 confirms the clean (no workdir) path.
+- **UserPromptSubmit hook idempotency (TC-68):** Overwrite semantics confirmed — running setup.sh twice with the field set always produces the same exact `hooks.UserPromptSubmit` value (no accumulation/duplication).
+- **`python3` unavailable** in test environment — config modification for tests uses `jq` instead (`. + {field: value}` pattern). No functional impact on test validity.
+- **No regressions** — all 54 Session 1–4 tests continue to pass.
+
+---
+
+#### Verdict
+
+**PASS** — All 68 test cases pass. The Session 5 implementation satisfies all new acceptance criteria in REQUIREMENT.md §2.9 (Windows/winget) and §2.10 (default_working_dir).
+
+---
+
 ## Change Log
 
 | Date | Session | Change |
@@ -279,6 +349,7 @@
 | 2026-03-21 | 2 | Added TC-26..TC-36 (11 new test cases for req 2.5/2.6/2.7); all 36 PASS; verdict: PASS |
 | 2026-03-21 | 3 | Updated TC-03/04/15/26 + SETTINGS_FILE path; added TC-37..TC-51 (15 new tests for req 2.2/2.8/2.9); all 51 PASS; verdict: PASS |
 | 2026-03-21 | 4 | Added TC-52..TC-54 (3 new tests for maybe_sudo() fix); all 54 PASS; verdict: PASS |
+| 2026-03-22 | 5 | Added TC-55..TC-68 (14 new tests for Windows/winget and default_working_dir); all 68 PASS; verdict: PASS |
 
 ---
 

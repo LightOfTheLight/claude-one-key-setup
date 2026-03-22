@@ -249,6 +249,66 @@
 
 ---
 
+---
+
+### Session 5 — 2026-03-22
+
+**Trigger:** Chain trigger from PO agent (commit `27a3efc`) — two new requirements: Windows winget support (req 2.9) and default working directory (req 2.10)
+
+**Task:** Implement Windows/winget dependency install support and `default_working_dir` feature
+
+---
+
+#### Thinking Process
+
+1. **Requirements analysis:**
+   - **2.9 Windows winget support**: The previous `detect_pkg_mgr()` only handled macOS and Linux. Need to add detection for Windows environments running via Git Bash / MSYS2 / Cygwin (where `uname -s` returns `MINGW*`, `MSYS*`, or `CYGWIN*`). Need `get_winget_id()` mapping (package names differ from winget IDs: `jq` → `jqlang.jq`, `gh` → `GitHub.cli`). Also need a `none-windows` error path when winget is absent.
+   - **2.10 Default working directory**: No native Claude Code `cwd` setting exists. Chose **UserPromptSubmit hook** approach — fires before each user turn, prepends a reminder to Claude's context. Stored `default_working_dir` in `settings.json` so the hook script reads it dynamically without needing the config file.
+
+2. **Key design decisions:**
+
+   | Decision | Rationale |
+   |----------|-----------|
+   | `uname -s` pattern match for `MINGW*\|MSYS*\|CYGWIN*` | These are the `uname` outputs for Git Bash / MSYS2 / Cygwin on Windows; WSL returns `Linux` and is handled by the Linux path as expected |
+   | `get_winget_id()` helper function | Winget uses reversed-domain IDs (`jqlang.jq`, `GitHub.cli`); mapping is separate from install logic for clarity |
+   | `none-windows` separate from `none` | Allows distinct, actionable error messages — Windows users get winget-specific instructions |
+   | PATH refresh after winget install | Winget writes to `%LOCALAPPDATA%/Microsoft/WinGet/Links` which may not be in the shell's current PATH; attempt refresh so subsequent `command -v` checks succeed in the same session |
+   | `UserPromptSubmit` hook for `default_working_dir` | Prepends working directory reminder to every user turn; Claude sees it as context; no shell-level `cd` needed |
+   | Hook only injected when `default_working_dir` is non-empty | Keeps settings.json clean when feature is not configured; idempotent — always sets exact value, never accumulates |
+   | `workdir-prompt.sh` reads from `~/.claude/settings.json` | Decoupled from the repo path; works even if Claude is launched from a different directory than where setup.sh lives |
+
+3. **Idempotency verified:** Running `setup.sh` twice with `default_working_dir` set produces the same `UserPromptSubmit` hook entry (overwrite semantics, not append).
+
+4. **`none` error message updated:** Added Windows winget instructions to the generic `none` fallback so users who somehow reach it still see all options.
+
+---
+
+#### Files Created / Modified
+
+| File | Action | Description |
+|------|--------|-------------|
+| `setup.sh` | Modified | Added Windows detection in `detect_pkg_mgr()`; added `get_winget_id()` helper; added `winget`/`none-windows` cases in `install_dep()`; added `default_working_dir` processing and `UserPromptSubmit` hook injection; updated summary output |
+| `scripts/workdir-prompt.sh` | Created | UserPromptSubmit hook — reads `default_working_dir` from `~/.claude/settings.json` and emits a working directory reminder |
+| `agents/DEV/history.md` | Updated | This file |
+
+---
+
+#### Acceptance Criteria Coverage (Session 5)
+
+| Criterion | Status |
+|-----------|--------|
+| Windows detected via `uname -s` (`MINGW*`/`MSYS*`/`CYGWIN*`) | ✅ `detect_pkg_mgr()` updated |
+| winget used when available on Windows | ✅ `install_dep()` `winget` case |
+| `winget install jqlang.jq` for jq | ✅ via `get_winget_id()` mapping |
+| `winget install GitHub.cli` for gh | ✅ via `get_winget_id()` mapping |
+| Error + Microsoft Store instructions when winget absent | ✅ `none-windows` case |
+| `claude-config.json` supports `default_working_dir` field | ✅ Accepted by setup.sh; stored to settings.json |
+| `default_working_dir` scopes all operations to that directory | ✅ via `UserPromptSubmit` hook reminder |
+| Fallback: no change when `default_working_dir` unset | ✅ Hook only injected when field is non-empty |
+| Summary output shows working directory status | ✅ Added to end of summary |
+
+---
+
 ## Change Log
 
 | Date | Session | Change |
@@ -257,6 +317,7 @@
 | 2026-03-21 | 2 | Added `Edit(**/*)`  permission; GH Actions monitoring hook; branch cleanup via GitHub API |
 | 2026-03-21 | 3 | Fixed global settings target (`~/.claude/settings.json`); added permissions subfiles; added dependency auto-install |
 | 2026-03-21 | 4 | Fixed `sudo`-less container handling in `install_dep()` via `maybe_sudo()` helper |
+| 2026-03-22 | 5 | Added Windows/winget support; added `default_working_dir` feature via UserPromptSubmit hook |
 
 ---
 

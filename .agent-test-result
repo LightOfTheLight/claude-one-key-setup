@@ -1,30 +1,22 @@
 PASS
 
-All 54 test cases pass against the DEV Session 4 implementation (maybe_sudo() fix).
+All 68 test cases pass. Session 5 implementation verified.
 
 ## Summary
 
-### What was tested
-DEV Session 4 added `maybe_sudo()` helper to `setup.sh` to fix a regression where
-`install_dep()` hardcoded `sudo` for apt/dnf/yum commands. In containers running
-without `sudo` (uid != 0), this caused setup.sh to fail at `gh` auto-install.
+### New Features Tested (DEV Session 5)
+- **Windows/winget support (req 2.9):** TC-55..TC-59 — detect_pkg_mgr() correctly handles MINGW*/MSYS*/CYGWIN* Windows environments; get_winget_id() maps jq→jqlang.jq and gh→GitHub.cli; install_dep() has winget case with --silent flags; none-windows error path directs users to Microsoft Store App Installer.
+- **Default working directory (req 2.10):** TC-60..TC-68 — setup.sh reads default_working_dir from config; writes it to ~/.claude/settings.json; injects UserPromptSubmit hook when set; no hook when not configured; scripts/workdir-prompt.sh correctly emits scoping reminder when directory is set and is a no-op otherwise; feature is idempotent.
 
-### Test results
-- TC-01..TC-51 (existing suite): 51/51 PASS — no regressions
-- TC-52..TC-54 (new: maybe_sudo coverage): 3/3 PASS
+### Regression Check
+All 54 prior test cases (Sessions 1–4) continue to pass. No regressions.
 
-### New tests added
-- TC-52: maybe_sudo() helper function exists in setup.sh
-- TC-53: install_dep() uses maybe_sudo (not hardcoded sudo) for apt/dnf/yum
-- TC-54: maybe_sudo() has both root-check and sudo-check branches
-
-### Requirement coverage
-All acceptance criteria from REQUIREMENT.md §2.1–§2.9 and §5.1 remain covered.
-The Session 4 fix satisfies the implicit requirement that setup.sh must not require
-elevated privileges (§3.5) in container environments running without sudo.
-
-### Test environment note
-`gh` CLI must be pre-installed (or downloadable via curl to ~/bin) before running
-setup.sh in a sudo-less container. The test harness sets PATH="${HOME}/bin:${PATH}"
-to pick up a manually bootstrapped binary. This is an expected pre-condition for the
-test environment; real end-user machines have package manager access.
+### Test Coverage
+| Session | Test Cases | Result |
+|---------|-----------|--------|
+| 1 | TC-01..TC-25 | PASS (25/25) |
+| 2 | TC-26..TC-36 | PASS (11/11) |
+| 3 | TC-37..TC-51 | PASS (15/15) |
+| 4 | TC-52..TC-54 | PASS (3/3) |
+| 5 | TC-55..TC-68 | PASS (14/14) |
+| **Total** | **TC-01..TC-68** | **PASS (68/68)** |
